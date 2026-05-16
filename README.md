@@ -44,6 +44,37 @@ Read [SPECIFICATION.md](./SPECIFICATION.md) before making product, route, databa
 - `npm run test:unit`: run Vitest unit tests.
 - `npm run test:e2e`: run Playwright tests.
 
+## Supabase Migrations
+
+```bash
+# Start local Supabase
+npx supabase start
+
+# Create a new migration
+npx supabase migration new <migration_name>
+
+# Rebuild the local database and replay all migrations
+npx supabase db reset
+
+# Generate database types from local Supabase
+npx supabase gen types typescript --local > types/database.ts
+
+# Check the app after local migration changes
+npm run lint
+npm run test:unit
+npm run build
+
+# Link this repo to the existing cloud Supabase project once per machine
+npx supabase login
+npx supabase link --project-ref <project_ref>
+
+# Push verified local migrations to the linked cloud project
+npx supabase db push
+
+# Stop local Supabase when finished
+npx supabase stop
+```
+
 ## Routes
 
 - Public: `/`, `/pricing`, `/login`, `/register`, `/forgot-password`, `/reset-password`, `/terms`, `/privacy`
