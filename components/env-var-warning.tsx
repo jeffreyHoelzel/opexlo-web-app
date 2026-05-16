@@ -9,10 +9,10 @@ export function EnvVarWarning() {
       </Badge>
       <div className="flex gap-2">
         <Button size="sm" variant={"outline"} disabled>
-          Sign in
+          Log in
         </Button>
         <Button size="sm" variant={"default"} disabled>
-          Sign up
+          Register
         </Button>
       </div>
     </div>
