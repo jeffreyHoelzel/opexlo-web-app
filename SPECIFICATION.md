@@ -576,60 +576,60 @@ The root route should behave differently depending on authentication state:
 
 Public routes are available without authentication unless redirect behavior states otherwise.
 
-| Route | Purpose |
-| --- | --- |
-| `/` | Public landing page for unauthenticated users. Redirects authenticated users to `/app/today`. |
-| `/pricing` | Public pricing page showing Free, Tier 1, and Tier 2 plans. |
-| `/login` | User login page. Redirects authenticated users to `/app/today`. |
-| `/register` | User registration page. Redirects authenticated users to `/app/today`. |
-| `/forgot-password` | Password reset request page. |
-| `/reset-password` | Password reset completion page after email link redirect. |
-| `/terms` | Terms of service page. |
-| `/privacy` | Privacy policy page. |
-| `/*` | Global 404 Not Found page for invalid or unmatched routes. |
+| Route              | Purpose                                                                                       |
+| ------------------ | --------------------------------------------------------------------------------------------- |
+| `/`                | Public landing page for unauthenticated users. Redirects authenticated users to `/app/today`. |
+| `/pricing`         | Public pricing page showing Free, Tier 1, and Tier 2 plans.                                   |
+| `/login`           | User login page. Redirects authenticated users to `/app/today`.                               |
+| `/register`        | User registration page. Redirects authenticated users to `/app/today`.                        |
+| `/forgot-password` | Password reset request page.                                                                  |
+| `/reset-password`  | Password reset completion page after email link redirect.                                     |
+| `/terms`           | Terms of service page.                                                                        |
+| `/privacy`         | Privacy policy page.                                                                          |
+| `/*`               | Global 404 Not Found page for invalid or unmatched routes.                                    |
 
 ### 9.3 Protected App Routes
 
 Protected routes require an authenticated user session.
 
-| Route | Purpose |
-| --- | --- |
-| `/app` | Main authenticated app entry. Redirects to `/app/today`. |
-| `/app/today` | Primary Today view with planned tasks, time blocks, focus session, and progress. |
-| `/app/inbox` | Unorganized captured tasks. |
-| `/app/tasks` | All tasks view with filtering and search. |
-| `/app/tasks/new` | Modal route for creating a task using the shared task form. |
-| `/app/tasks/[taskId]` | Task detail route for reading, editing, completing, deleting, and managing reminders. May open as a modal where practical. |
-| `/app/projects` | Project list view. |
-| `/app/projects/new` | Modal route for creating a project using the shared project form. |
-| `/app/projects/[projectId]` | Project detail route with linked tasks, notes, goals, and analytics. May open as a modal where practical. |
-| `/app/areas` | Area list view for broad life or work categories. |
-| `/app/areas/new` | Modal route for creating an area using the shared area form. |
-| `/app/areas/[areaId]` | Area detail route with linked projects, tasks, and goals. May open as a modal where practical. |
-| `/app/goals` | Goal list view. |
-| `/app/goals/new` | Modal route for creating a goal using the shared goal form. |
-| `/app/goals/[goalId]` | Goal detail route with linked projects, tasks, notes, and progress. May open as a modal where practical. |
-| `/app/notes` | Notes list view. |
-| `/app/notes/new` | Modal route for creating a note using the shared note form. |
-| `/app/notes/[noteId]` | Note detail route for reading, editing, linking, and deleting. May open as a modal where practical. |
-| `/app/planner` | Dedicated daily planning workflow. |
-| `/app/focus` | Focus session view. Focus mode should primarily appear as an overlay that can continue running across app pages. |
-| `/app/analytics` | Simplified analytics dashboard. Requires a paid Tier 1 or Tier 2 subscription. |
-| `/app/settings` | User settings page. |
-| `/app/settings/account` | Account profile and authentication related settings. |
-| `/app/settings/notifications` | Reminder and email notification preferences. |
-| `/app/settings/billing` | Billing status and subscription management entry point. |
+| Route                         | Purpose                                                                                                                    |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `/app`                        | Main authenticated app entry. Redirects to `/app/today`.                                                                   |
+| `/app/today`                  | Primary Today view with planned tasks, time blocks, focus session, and progress.                                           |
+| `/app/inbox`                  | Unorganized captured tasks.                                                                                                |
+| `/app/tasks`                  | All tasks view with filtering and search.                                                                                  |
+| `/app/tasks/new`              | Modal route for creating a task using the shared task form.                                                                |
+| `/app/tasks/[taskId]`         | Task detail route for reading, editing, completing, deleting, and managing reminders. May open as a modal where practical. |
+| `/app/projects`               | Project list view.                                                                                                         |
+| `/app/projects/new`           | Modal route for creating a project using the shared project form.                                                          |
+| `/app/projects/[projectId]`   | Project detail route with linked tasks, notes, goals, and analytics. May open as a modal where practical.                  |
+| `/app/areas`                  | Area list view for broad life or work categories.                                                                          |
+| `/app/areas/new`              | Modal route for creating an area using the shared area form.                                                               |
+| `/app/areas/[areaId]`         | Area detail route with linked projects, tasks, and goals. May open as a modal where practical.                             |
+| `/app/goals`                  | Goal list view.                                                                                                            |
+| `/app/goals/new`              | Modal route for creating a goal using the shared goal form.                                                                |
+| `/app/goals/[goalId]`         | Goal detail route with linked projects, tasks, notes, and progress. May open as a modal where practical.                   |
+| `/app/notes`                  | Notes list view.                                                                                                           |
+| `/app/notes/new`              | Modal route for creating a note using the shared note form.                                                                |
+| `/app/notes/[noteId]`         | Note detail route for reading, editing, linking, and deleting. May open as a modal where practical.                        |
+| `/app/planner`                | Dedicated daily planning workflow.                                                                                         |
+| `/app/focus`                  | Focus session view. Focus mode should primarily appear as an overlay that can continue running across app pages.           |
+| `/app/analytics`              | Simplified analytics dashboard. Requires a paid Tier 1 or Tier 2 subscription.                                             |
+| `/app/settings`               | User settings page.                                                                                                        |
+| `/app/settings/account`       | Account profile and authentication related settings.                                                                       |
+| `/app/settings/notifications` | Reminder and email notification preferences.                                                                               |
+| `/app/settings/billing`       | Billing status and subscription management entry point.                                                                    |
 
 ### 9.4 Billing Routes
 
 Billing routes support subscription checkout and account management through Stripe.
 
-| Route | Purpose |
-| --- | --- |
-| `/pricing` | Public plan comparison and upgrade entry point. |
+| Route                   | Purpose                                                                       |
+| ----------------------- | ----------------------------------------------------------------------------- |
+| `/pricing`              | Public plan comparison and upgrade entry point.                               |
 | `/app/settings/billing` | Authenticated billing management page and Stripe Customer Portal entry point. |
-| `/billing/success` | Stripe Checkout success redirect page. |
-| `/billing/cancel` | Stripe Checkout cancellation redirect page. |
+| `/billing/success`      | Stripe Checkout success redirect page.                                        |
+| `/billing/cancel`       | Stripe Checkout cancellation redirect page.                                   |
 
 Billing management should primarily rely on Stripe Checkout and Stripe Customer Portal instead of custom payment forms.
 
@@ -637,13 +637,13 @@ Billing management should primarily rely on Stripe Checkout and Stripe Customer 
 
 Server routes should be implemented with Next.js route handlers when a server side operation is required.
 
-| Route | Purpose |
-| --- | --- |
-| `/api/stripe/create-checkout-session` | Creates a Stripe Checkout session for Tier 1 or Tier 2. |
-| `/api/stripe/create-portal-session` | Creates a Stripe Customer Portal session for billing management. |
-| `/api/webhooks/stripe` | Receives Stripe webhook events and syncs subscription status into Supabase. |
-| `/api/cron/reminders` | Vercel Cron route that checks for due reminders and sends emails through Resend. |
-| `/api/cron/recurring-tasks` | Optional Vercel Cron route that creates recurring task instances. |
+| Route                                 | Purpose                                                                          |
+| ------------------------------------- | -------------------------------------------------------------------------------- |
+| `/api/stripe/create-checkout-session` | Creates a Stripe Checkout session for Tier 1 or Tier 2.                          |
+| `/api/stripe/create-portal-session`   | Creates a Stripe Customer Portal session for billing management.                 |
+| `/api/webhooks/stripe`                | Receives Stripe webhook events and syncs subscription status into Supabase.      |
+| `/api/cron/reminders`                 | Vercel Cron route that checks for due reminders and sends emails through Resend. |
+| `/api/cron/recurring-tasks`           | Optional Vercel Cron route that creates recurring task instances.                |
 
 Most CRUD operations should use Supabase client/server utilities, server actions, or route handlers depending on security needs and implementation clarity. The app does not need a separate REST endpoint for every page if server actions provide a cleaner developer experience.
 
@@ -651,17 +651,17 @@ Most CRUD operations should use Supabase client/server utilities, server actions
 
 The MVP should support create, read, update, and delete operations for the following core entities:
 
-| Entity | Primary Routes |
-| --- | --- |
-| Tasks | `/app/inbox`, `/app/tasks`, `/app/tasks/new`, `/app/tasks/[taskId]`, `/app/today` |
-| Projects | `/app/projects`, `/app/projects/new`, `/app/projects/[projectId]` |
-| Areas | `/app/areas`, `/app/areas/new`, `/app/areas/[areaId]` |
-| Goals | `/app/goals`, `/app/goals/new`, `/app/goals/[goalId]` |
-| Notes | `/app/notes`, `/app/notes/new`, `/app/notes/[noteId]` |
-| Time blocks | `/app/today`, `/app/planner`, `/app/tasks/[taskId]` |
-| Focus sessions | `/app/focus`, `/app/today`, `/app/tasks/[taskId]` |
-| Reminders | `/app/tasks/[taskId]`, `/app/settings/notifications` |
-| Subscriptions | `/pricing`, `/app/settings/billing`, `/billing/success`, `/billing/cancel` |
+| Entity         | Primary Routes                                                                    |
+| -------------- | --------------------------------------------------------------------------------- |
+| Tasks          | `/app/inbox`, `/app/tasks`, `/app/tasks/new`, `/app/tasks/[taskId]`, `/app/today` |
+| Projects       | `/app/projects`, `/app/projects/new`, `/app/projects/[projectId]`                 |
+| Areas          | `/app/areas`, `/app/areas/new`, `/app/areas/[areaId]`                             |
+| Goals          | `/app/goals`, `/app/goals/new`, `/app/goals/[goalId]`                             |
+| Notes          | `/app/notes`, `/app/notes/new`, `/app/notes/[noteId]`                             |
+| Time blocks    | `/app/today`, `/app/planner`, `/app/tasks/[taskId]`                               |
+| Focus sessions | `/app/focus`, `/app/today`, `/app/tasks/[taskId]`                                 |
+| Reminders      | `/app/tasks/[taskId]`, `/app/settings/notifications`                              |
+| Subscriptions  | `/pricing`, `/app/settings/billing`, `/billing/success`, `/billing/cancel`        |
 
 Create and edit flows should use modal routes where practical. Since creating and editing tasks, projects, areas, goals, and notes share similar forms, they should reuse the same form components with mode specific behavior.
 
@@ -1277,4 +1277,3 @@ Potential future features:
 - Advanced gamification
 - Public API
 - Team workspaces
-

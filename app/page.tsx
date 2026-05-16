@@ -219,8 +219,8 @@ async function LandingPage() {
               One page for the work that matters now.
             </h2>
             <p className="mt-5 text-base leading-7 text-muted-foreground">
-              Opexlo keeps the backlog out of the way until you need it, so
-              your day starts with priorities, realistic time, and a clear next
+              Opexlo keeps the backlog out of the way until you need it, so your
+              day starts with priorities, realistic time, and a clear next
               session.
             </p>
           </div>
@@ -256,10 +256,7 @@ async function LandingPage() {
         </div>
       </section>
 
-      <section
-        className="mx-auto max-w-6xl px-6 py-16 sm:px-8"
-        id="principles"
-      >
+      <section className="mx-auto max-w-6xl px-6 py-16 sm:px-8" id="principles">
         <div className="max-w-3xl">
           <p className="text-sm font-medium uppercase tracking-[0.18em] text-primary">
             Product principles

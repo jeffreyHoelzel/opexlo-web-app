@@ -3,11 +3,7 @@ import { Suspense } from "react";
 import { AppTopNav } from "@/components/app-top-nav";
 import { requireUserClaims } from "@/lib/auth";
 
-export default function AppLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <Suspense fallback={<AppShellFallback />}>
       <ProtectedAppShell>{children}</ProtectedAppShell>

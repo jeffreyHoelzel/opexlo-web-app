@@ -15,7 +15,10 @@ export function PublicTopNav() {
         </Link>
 
         <nav className="hidden items-center gap-6 text-sm text-muted-foreground md:flex">
-          <Link className="transition-colors hover:text-foreground" href="/#workflow">
+          <Link
+            className="transition-colors hover:text-foreground"
+            href="/#workflow"
+          >
             Workflow
           </Link>
           <Link
@@ -29,6 +32,12 @@ export function PublicTopNav() {
             href="/#principles"
           >
             Principles
+          </Link>
+          <Link
+            className="transition-colors hover:text-foreground"
+            href="/pricing"
+          >
+            Pricing
           </Link>
         </nav>
 

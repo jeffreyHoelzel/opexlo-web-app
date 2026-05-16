@@ -65,10 +65,10 @@ export function SignUpForm({
     <div className={cn("flex flex-col gap-6", className)} {...props}>
       <Card>
         <CardHeader>
-            <CardTitle className="text-2xl">Create your Opexlo account</CardTitle>
-            <CardDescription>
-              Start with a calm place to plan today.
-            </CardDescription>
+          <CardTitle className="text-2xl">Create your Opexlo account</CardTitle>
+          <CardDescription>
+            Start with a calm place to plan today.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSignUp}>

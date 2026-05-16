@@ -51,10 +51,10 @@ export function LoginForm({
     <div className={cn("flex flex-col gap-6", className)} {...props}>
       <Card>
         <CardHeader>
-            <CardTitle className="text-2xl">Log in to Opexlo</CardTitle>
-            <CardDescription>
-              Continue into your daily planning workspace.
-            </CardDescription>
+          <CardTitle className="text-2xl">Log in to Opexlo</CardTitle>
+          <CardDescription>
+            Continue into your daily planning workspace.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleLogin}>
@@ -95,10 +95,7 @@ export function LoginForm({
             </div>
             <div className="mt-4 text-center text-sm">
               Don&apos;t have an account?{" "}
-              <Link
-                href="/register"
-                className="underline underline-offset-4"
-              >
+              <Link href="/register" className="underline underline-offset-4">
                 Create one
               </Link>
             </div>

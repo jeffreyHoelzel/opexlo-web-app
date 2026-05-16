@@ -90,7 +90,10 @@ export function TodayDashboard() {
 
   const stats = useMemo(() => {
     const completed = tasks.filter((task) => task.completed).length;
-    const plannedMinutes = tasks.reduce((total, task) => total + task.minutes, 0);
+    const plannedMinutes = tasks.reduce(
+      (total, task) => total + task.minutes,
+      0,
+    );
     const completedMinutes = tasks
       .filter((task) => task.completed)
       .reduce((total, task) => total + task.minutes, 0);
@@ -263,7 +266,8 @@ export function TodayDashboard() {
                       <span
                         className={cn(
                           "block truncate text-sm font-medium text-foreground",
-                          task.completed && "text-muted-foreground line-through",
+                          task.completed &&
+                            "text-muted-foreground line-through",
                         )}
                       >
                         {task.title}
@@ -319,7 +323,9 @@ export function TodayDashboard() {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Top priorities</CardTitle>
-              <CardDescription>Keep these visible while you work.</CardDescription>
+              <CardDescription>
+                Keep these visible while you work.
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               {topPriorities.map((task) => (
