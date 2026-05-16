@@ -1,10 +1,10 @@
 import { redirect } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/server";
-import { hasEnvVars } from "@/lib/utils";
+import { hasSupabaseEnvVars } from "@/lib/utils";
 
 export async function redirectIfAuthenticated() {
-  if (!hasEnvVars) {
+  if (!hasSupabaseEnvVars) {
     return;
   }
 
@@ -17,7 +17,7 @@ export async function redirectIfAuthenticated() {
 }
 
 export async function requireUserClaims() {
-  if (!hasEnvVars) {
+  if (!hasSupabaseEnvVars) {
     redirect("/login");
   }
 
