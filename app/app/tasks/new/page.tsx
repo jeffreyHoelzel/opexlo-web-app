@@ -1,11 +1,5 @@
-import { PlaceholderPage } from "@/components/placeholder-page";
+import { NewTaskModalBridge } from "./new-task-modal-bridge";
 
 export default function NewTaskPage() {
-  return (
-    <PlaceholderPage
-      description="The task creation route will reuse the shared task form for title, due date, priority, estimate, project, and notes."
-      eyebrow="Tasks"
-      title="New task"
-    />
-  );
+  return <NewTaskModalBridge />;
 }
