@@ -40,10 +40,14 @@ export function SignUpForm({
     }
 
     try {
+      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
+          data: {
+            timezone,
+          },
           emailRedirectTo: `${window.location.origin}/auth/confirm?next=/app/today`,
         },
       });

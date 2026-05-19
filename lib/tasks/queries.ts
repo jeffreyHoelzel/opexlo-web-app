@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 
 import { getDateInTimeZone } from "@/lib/tasks/date";
+import { getTimezoneFallback } from "@/lib/timezone";
 import type {
   TaskFormOptions,
   TaskListItem,
@@ -63,7 +65,16 @@ export async function getUserTimezone(context?: TaskQueryContext) {
     .eq("user_id", taskContext.userId)
     .maybeSingle();
 
-  return data?.timezone || "UTC";
+  let headerTimezone: string | null = null;
+
+  try {
+    const requestHeaders = await headers();
+    headerTimezone = requestHeaders.get("x-vercel-ip-timezone");
+  } catch {
+    headerTimezone = null;
+  }
+
+  return getTimezoneFallback(data?.timezone, headerTimezone);
 }
 
 export async function getTaskOptions(

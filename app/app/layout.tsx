@@ -1,9 +1,12 @@
 import { Suspense } from "react";
 
 import { AppTopNav } from "@/components/app-top-nav";
+import { MindfulPlanningWelcomeModal } from "@/components/planner/mindful-planning-welcome-modal";
+import { ProfileTimezoneSync } from "@/components/profile-timezone-sync";
 import { GlobalTaskLauncher } from "@/components/tasks/global-task-launcher";
 import { TaskLauncherProvider } from "@/components/tasks/task-launcher-context";
 import { requireUserClaims } from "@/lib/auth";
+import { getMindfulPlanningWelcomeData } from "@/lib/planner/queries";
 import { getTaskModalData } from "@/lib/tasks/queries";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -17,11 +20,17 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 async function ProtectedAppShell({ children }: { children: React.ReactNode }) {
   const claims = await requireUserClaims();
   const email = typeof claims.email === "string" ? claims.email : undefined;
-  const taskModalData = await getTaskModalData();
+  const [taskModalData, mindfulPlanningBootstrap] = await Promise.all([
+    getTaskModalData(),
+    getMindfulPlanningWelcomeData(),
+  ]);
 
   return (
     <div className="min-h-screen bg-background">
       <TaskLauncherProvider>
+        <ProfileTimezoneSync
+          currentProfileTimezone={mindfulPlanningBootstrap.profileTimezone}
+        />
         <AppTopNav email={email} />
         <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
           {children}
@@ -30,6 +39,7 @@ async function ProtectedAppShell({ children }: { children: React.ReactNode }) {
           initialOptions={taskModalData.options}
           initialRecentTasks={taskModalData.recentTasks}
         />
+        <MindfulPlanningWelcomeModal bootstrap={mindfulPlanningBootstrap} />
       </TaskLauncherProvider>
     </div>
   );
