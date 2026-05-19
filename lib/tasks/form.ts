@@ -2,15 +2,66 @@ import { z } from "zod";
 
 import { TASK_PRIORITIES } from "@/lib/tasks/types";
 
-const nullableDateSchema = z.preprocess(
-  (value) => {
-    if (typeof value !== "string") {
-      return null;
+function isValidDateParts(year: number, month: number, day: number) {
+  const parsedDate = new Date(Date.UTC(year, month - 1, day));
+
+  return (
+    parsedDate.getUTCFullYear() === year &&
+    parsedDate.getUTCMonth() === month - 1 &&
+    parsedDate.getUTCDate() === day
+  );
+}
+
+function toIsoDate(year: number, month: number, day: number) {
+  return `${year.toString().padStart(4, "0")}-${month
+    .toString()
+    .padStart(2, "0")}-${day.toString().padStart(2, "0")}`;
+}
+
+function normalizeDateInput(value: unknown) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+
+  if (trimmed.length === 0) {
+    return null;
+  }
+
+  const isoMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+  if (isoMatch) {
+    const [, yearText, monthText, dayText] = isoMatch;
+    const year = Number(yearText);
+    const month = Number(monthText);
+    const day = Number(dayText);
+
+    if (isValidDateParts(year, month, day)) {
+      return toIsoDate(year, month, day);
     }
 
-    const trimmed = value.trim();
-    return trimmed.length > 0 ? trimmed : null;
-  },
+    return trimmed;
+  }
+
+  const slashMatch = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+
+  if (slashMatch) {
+    const [, monthText, dayText, yearText] = slashMatch;
+    const year = Number(yearText);
+    const month = Number(monthText);
+    const day = Number(dayText);
+
+    if (isValidDateParts(year, month, day)) {
+      return toIsoDate(year, month, day);
+    }
+  }
+
+  return trimmed;
+}
+
+const nullableDateSchema = z.preprocess(
+  normalizeDateInput,
   z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, "Use a valid date.")

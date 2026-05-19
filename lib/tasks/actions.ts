@@ -305,7 +305,7 @@ export async function createTaskAction(
 
   try {
     const taskId = await createTask(parsed.data);
-    return successState("Task created.", taskId);
+    return successState("Task created successfully.", taskId);
   } catch (error) {
     return errorState(getErrorMessage(error));
   }

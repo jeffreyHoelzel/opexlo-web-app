@@ -35,6 +35,9 @@ import { getTaskById } from "@/lib/tasks/queries";
 
 type TaskDetailPageProps = {
   params: Promise<{ taskId: string }>;
+  searchParams: Promise<{
+    return_to?: string | string[];
+  }>;
 };
 
 function TaskActionForm({
@@ -63,8 +66,34 @@ function formatDate(value: string | null) {
   return `${month}/${day}/${year}`;
 }
 
-export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
-  const { taskId } = await params;
+function getReturnPath(value: string | string[] | undefined) {
+  const resolvedValue = Array.isArray(value) ? value[0] : value;
+
+  if (!resolvedValue || !resolvedValue.startsWith("/app/")) {
+    return null;
+  }
+
+  return resolvedValue;
+}
+
+function withSavedFlag(path: string) {
+  const [pathname, search = ""] = path.split("?");
+  const searchParams = new URLSearchParams(search);
+  searchParams.set("saved", "1");
+
+  return `${pathname}?${searchParams.toString()}`;
+}
+
+export default async function TaskDetailPage({
+  params,
+  searchParams,
+}: TaskDetailPageProps) {
+  const [{ taskId }, resolvedSearchParams] = await Promise.all([
+    params,
+    searchParams,
+  ]);
+  const returnPath = getReturnPath(resolvedSearchParams.return_to);
+  const successRedirectPath = withSavedFlag(returnPath ?? "/app/tasks");
   const taskData = await getTaskById(taskId);
 
   if (!taskData) {
@@ -106,7 +135,12 @@ export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <TaskForm mode="edit" options={options} task={task} />
+              <TaskForm
+                mode="edit"
+                options={options}
+                successRedirectPath={successRedirectPath}
+                task={task}
+              />
             </CardContent>
           </Card>
         </div>
@@ -144,7 +178,7 @@ export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
                 >
                   <Button className="w-full" type="submit" variant="outline">
                     <CalendarPlus />
-                    Plan for today
+                    Set to today
                   </Button>
                 </TaskActionForm>
               )}
@@ -182,7 +216,7 @@ export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
                 </span>
               </div>
               <div className="flex justify-between gap-4">
-                <span className="text-muted-foreground">Planned</span>
+                <span className="text-muted-foreground">Planned start</span>
                 <span className="text-right font-medium text-foreground">
                   {formatDate(task.planned_date)}
                 </span>

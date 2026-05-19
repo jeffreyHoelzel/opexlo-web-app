@@ -24,6 +24,14 @@ type TodayDashboardProps = {
   timezone: string;
 };
 
+function getTodayTaskHref(taskId: string) {
+  const searchParams = new URLSearchParams({
+    return_to: "/app/today",
+  });
+
+  return `/app/tasks/${taskId}?${searchParams.toString()}`;
+}
+
 function formatMinutes(minutes: number) {
   const hours = Math.floor(minutes / 60);
   const remainingMinutes = minutes % 60;
@@ -95,7 +103,7 @@ export function TodayDashboard({
                     : "No estimate set"}
                 </p>
                 <Button asChild className="mt-4 w-full">
-                  <Link href={`/app/tasks/${nextTask.id}`}>Open task</Link>
+                  <Link href={getTodayTaskHref(nextTask.id)}>Open task</Link>
                 </Button>
               </div>
             ) : (
@@ -159,6 +167,7 @@ export function TodayDashboard({
           </CardHeader>
           <CardContent>
             <TaskList
+              editReturnPath="/app/today"
               emptyDescription="Use the floating task button or plan an inbox task for today."
               emptyTitle="Nothing planned for today"
               showUnplan
@@ -204,7 +213,7 @@ export function TodayDashboard({
                 priorityTasks.map((task) => (
                   <Link
                     className="block rounded-lg bg-secondary/65 px-3 py-3 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
-                    href={`/app/tasks/${task.id}`}
+                    href={getTodayTaskHref(task.id)}
                     key={task.id}
                   >
                     {task.title}

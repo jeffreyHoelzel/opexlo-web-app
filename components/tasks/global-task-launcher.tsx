@@ -7,6 +7,7 @@ import {
   TaskPriorityBadge,
   TaskStatusBadge,
 } from "@/components/tasks/task-badges";
+import { useTaskLauncher } from "@/components/tasks/task-launcher-context";
 import { TaskForm } from "@/components/tasks/task-form";
 import { Button } from "@/components/ui/button";
 import { loadTaskModalDataAction } from "@/lib/tasks/actions";
@@ -28,17 +29,18 @@ function compactMeta(task: TaskListItem) {
   const items = [
     task.project_name ?? "Inbox",
     task.estimated_minutes ? `${task.estimated_minutes}m` : null,
-    task.planned_date ? `Planned ${task.planned_date}` : null,
+    task.planned_date ? `Start ${task.planned_date}` : null,
     task.due_date ? `Due ${task.due_date}` : null,
   ];
 
-  return items.filter(Boolean).join(" · ");
+  return items.filter(Boolean).join(" | ");
 }
 
 export function GlobalTaskLauncher({
   initialOptions,
   initialRecentTasks,
 }: GlobalTaskLauncherProps) {
+  const { registerOpenCreateTaskModal } = useTaskLauncher();
   const [isOpen, setIsOpen] = useState(false);
   const [mode, setMode] = useState<ModalMode>("create");
   const [editingTask, setEditingTask] = useState<TaskListItem | null>(null);
@@ -47,6 +49,7 @@ export function GlobalTaskLauncher({
     recentTasks: initialRecentTasks,
   });
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [successPopup, setSuccessPopup] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const refreshModalData = useCallback(() => {
@@ -69,6 +72,18 @@ export function GlobalTaskLauncher({
   }, [isOpen, refreshModalData]);
 
   useEffect(() => {
+    if (!successPopup) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setSuccessPopup(null);
+    }, 2500);
+
+    return () => window.clearTimeout(timeout);
+  }, [successPopup]);
+
+  useEffect(() => {
     if (!isOpen) {
       return;
     }
@@ -83,11 +98,11 @@ export function GlobalTaskLauncher({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isOpen]);
 
-  function openCreate() {
+  const openCreate = useCallback(() => {
     setEditingTask(null);
     setMode("create");
     setIsOpen(true);
-  }
+  }, []);
 
   function openRecent() {
     setEditingTask(null);
@@ -99,8 +114,30 @@ export function GlobalTaskLauncher({
     setMode("edit");
   }
 
+  function handleCreateSuccess() {
+    refreshModalData();
+    setEditingTask(null);
+    setMode("create");
+    setIsOpen(false);
+    setSuccessPopup("Task created successfully");
+  }
+
+  useEffect(() => {
+    return registerOpenCreateTaskModal(openCreate);
+  }, [openCreate, registerOpenCreateTaskModal]);
+
   return (
     <>
+      {successPopup ? (
+        <div
+          aria-live="polite"
+          className="fixed right-5 top-20 z-50 rounded-md border border-[hsl(var(--chart-3))] bg-[hsl(var(--chart-3))]/35 px-3 py-2 text-sm text-foreground shadow-sm sm:right-8"
+          role="status"
+        >
+          {successPopup}
+        </div>
+      ) : null}
+
       <Button
         aria-label="Create task"
         className="fixed bottom-5 right-5 z-40 h-12 rounded-full px-4 shadow-lg sm:bottom-8 sm:right-8"
@@ -179,7 +216,7 @@ export function GlobalTaskLauncher({
               {mode === "create" ? (
                 <TaskForm
                   mode="create"
-                  onSuccess={refreshModalData}
+                  onSuccess={handleCreateSuccess}
                   options={modalData.options}
                 />
               ) : null}

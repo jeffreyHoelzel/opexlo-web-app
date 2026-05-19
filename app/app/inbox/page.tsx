@@ -1,8 +1,7 @@
-import Link from "next/link";
 import { Inbox } from "lucide-react";
 
+import { OpenTaskModalButton } from "@/components/tasks/open-task-modal-button";
 import { TaskList } from "@/components/tasks/task-list";
-import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -30,12 +29,10 @@ export default async function InboxPage() {
             an area, or a goal.
           </p>
         </div>
-        <Button asChild>
-          <Link href="/app/tasks/new">
-            <Inbox />
-            New task
-          </Link>
-        </Button>
+        <OpenTaskModalButton>
+          <Inbox />
+          New task
+        </OpenTaskModalButton>
       </div>
 
       <Card>

@@ -1,10 +1,11 @@
 "use client";
 
-import { useActionState, useEffect, useRef } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { Save } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useFormStatus } from "react-dom";
 
+import { FieldHelpTooltip } from "@/components/tasks/field-help-tooltip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,10 +16,17 @@ import { TASK_PRIORITIES, type TaskFormOptions } from "@/lib/tasks/types";
 import type { TaskListItem } from "@/lib/tasks/types";
 import { cn } from "@/lib/utils";
 
+export type TaskFormSuccessResult = {
+  message: string;
+  mode: "create" | "edit";
+  taskId?: string;
+};
+
 type TaskFormProps = {
   mode: "create" | "edit";
-  onSuccess?: (taskId?: string) => void;
+  onSuccess?: (result: TaskFormSuccessResult) => void;
   options: TaskFormOptions;
+  successRedirectPath?: string;
   submitLabel?: string;
   task?: TaskListItem;
 };
@@ -37,15 +45,36 @@ function SubmitButton({ label }: { label: string }) {
   );
 }
 
+function LabelWithHelp({
+  fieldLabel,
+  helpText,
+  htmlFor,
+}: {
+  fieldLabel: string;
+  helpText: string;
+  htmlFor: string;
+}) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <Label htmlFor={htmlFor}>{fieldLabel}</Label>
+      <FieldHelpTooltip content={helpText} fieldLabel={fieldLabel} />
+    </div>
+  );
+}
+
 export function TaskForm({
   mode,
   onSuccess,
   options,
+  successRedirectPath,
   submitLabel,
   task,
 }: TaskFormProps) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
+  const handledSuccessSubmissionCountRef = useRef(0);
+  const submissionCountRef = useRef(0);
+  const [hasSubmitted, setHasSubmitted] = useState(false);
   const action = mode === "edit" ? updateTaskAction : createTaskAction;
   const [state, formAction] = useActionState(action, initialTaskActionState);
 
@@ -54,25 +83,50 @@ export function TaskForm({
       return;
     }
 
+    if (
+      submissionCountRef.current === handledSuccessSubmissionCountRef.current
+    ) {
+      return;
+    }
+
+    handledSuccessSubmissionCountRef.current = submissionCountRef.current;
+
     if (mode === "create") {
       formRef.current?.reset();
     }
 
+    if (successRedirectPath) {
+      router.push(successRedirectPath);
+      return;
+    }
+
     router.refresh();
-    onSuccess?.(state.taskId);
-  }, [mode, onSuccess, router, state]);
+    onSuccess?.({
+      message: state.message,
+      mode,
+      taskId: state.taskId,
+    });
+  }, [mode, onSuccess, router, state, successRedirectPath]);
 
   return (
     <form
       action={formAction}
       className="space-y-4"
       key={`${mode}-${task?.id ?? "new"}`}
+      onSubmit={() => {
+        submissionCountRef.current += 1;
+        setHasSubmitted(true);
+      }}
       ref={formRef}
     >
       {task ? <input name="task_id" type="hidden" value={task.id} /> : null}
 
       <div className="space-y-2">
-        <Label htmlFor={`${mode}-task-title`}>Title</Label>
+        <LabelWithHelp
+          fieldLabel="Title"
+          helpText="A short action statement for what you need to do."
+          htmlFor={`${mode}-task-title`}
+        />
         <Input
           autoComplete="off"
           defaultValue={task?.title ?? ""}
@@ -86,7 +140,11 @@ export function TaskForm({
 
       <div className="grid gap-4 sm:grid-cols-3">
         <div className="space-y-2">
-          <Label htmlFor={`${mode}-task-priority`}>Priority</Label>
+          <LabelWithHelp
+            fieldLabel="Priority"
+            helpText="Use priority to signal urgency and importance."
+            htmlFor={`${mode}-task-priority`}
+          />
           <select
             className={fieldClassName}
             defaultValue={task?.priority ?? "medium"}
@@ -103,19 +161,33 @@ export function TaskForm({
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor={`${mode}-task-estimate`}>Estimate</Label>
-          <Input
-            defaultValue={task?.estimated_minutes ?? ""}
-            id={`${mode}-task-estimate`}
-            min={1}
-            name="estimated_minutes"
-            placeholder="25"
-            type="number"
+          <LabelWithHelp
+            fieldLabel="Estimate (minutes)"
+            helpText="Estimated working time in minutes. This helps planning realism."
+            htmlFor={`${mode}-task-estimate`}
           />
+          <div className="relative">
+            <Input
+              className="pr-12"
+              defaultValue={task?.estimated_minutes ?? ""}
+              id={`${mode}-task-estimate`}
+              min={1}
+              name="estimated_minutes"
+              placeholder="25"
+              type="number"
+            />
+            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+              min
+            </span>
+          </div>
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor={`${mode}-task-due-date`}>Due date</Label>
+          <LabelWithHelp
+            fieldLabel="Due date"
+            helpText="Optional deadline date for when this task must be finished."
+            htmlFor={`${mode}-task-due-date`}
+          />
           <Input
             defaultValue={task?.due_date ?? ""}
             id={`${mode}-task-due-date`}
@@ -127,7 +199,11 @@ export function TaskForm({
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-2">
-          <Label htmlFor={`${mode}-task-planned-date`}>Planned date</Label>
+          <LabelWithHelp
+            fieldLabel="Planned start date"
+            helpText="The day you intend to start this task. If it matches your current day, the task appears in Today."
+            htmlFor={`${mode}-task-planned-date`}
+          />
           <Input
             defaultValue={task?.planned_date ?? ""}
             id={`${mode}-task-planned-date`}
@@ -137,7 +213,11 @@ export function TaskForm({
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor={`${mode}-task-project`}>Project</Label>
+          <LabelWithHelp
+            fieldLabel="Project"
+            helpText="Optional project grouping for related tasks."
+            htmlFor={`${mode}-task-project`}
+          />
           <select
             className={fieldClassName}
             defaultValue={task?.project_id ?? ""}
@@ -156,7 +236,11 @@ export function TaskForm({
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-2">
-          <Label htmlFor={`${mode}-task-area`}>Area</Label>
+          <LabelWithHelp
+            fieldLabel="Area"
+            helpText="Optional life/work area this task supports."
+            htmlFor={`${mode}-task-area`}
+          />
           <select
             className={fieldClassName}
             defaultValue={task?.area_id ?? ""}
@@ -173,7 +257,11 @@ export function TaskForm({
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor={`${mode}-task-goal`}>Goal</Label>
+          <LabelWithHelp
+            fieldLabel="Goal"
+            helpText="Optional long-term goal this task contributes to."
+            htmlFor={`${mode}-task-goal`}
+          />
           <select
             className={fieldClassName}
             defaultValue={task?.goal_id ?? ""}
@@ -191,7 +279,11 @@ export function TaskForm({
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor={`${mode}-task-description`}>Notes</Label>
+        <LabelWithHelp
+          fieldLabel="Notes"
+          helpText="Optional execution details, context, or checklist-style notes."
+          htmlFor={`${mode}-task-description`}
+        />
         <Textarea
           defaultValue={task?.description ?? ""}
           id={`${mode}-task-description`}
@@ -201,7 +293,7 @@ export function TaskForm({
         />
       </div>
 
-      {state.message ? (
+      {hasSubmitted && state.message ? (
         <p
           className={cn(
             "rounded-md border px-3 py-2 text-sm",

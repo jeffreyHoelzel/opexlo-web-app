@@ -2,6 +2,7 @@ import { Suspense } from "react";
 
 import { AppTopNav } from "@/components/app-top-nav";
 import { GlobalTaskLauncher } from "@/components/tasks/global-task-launcher";
+import { TaskLauncherProvider } from "@/components/tasks/task-launcher-context";
 import { requireUserClaims } from "@/lib/auth";
 import { getTaskModalData } from "@/lib/tasks/queries";
 
@@ -20,14 +21,16 @@ async function ProtectedAppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen bg-background">
-      <AppTopNav email={email} />
-      <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        {children}
-      </main>
-      <GlobalTaskLauncher
-        initialOptions={taskModalData.options}
-        initialRecentTasks={taskModalData.recentTasks}
-      />
+      <TaskLauncherProvider>
+        <AppTopNav email={email} />
+        <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+          {children}
+        </main>
+        <GlobalTaskLauncher
+          initialOptions={taskModalData.options}
+          initialRecentTasks={taskModalData.recentTasks}
+        />
+      </TaskLauncherProvider>
     </div>
   );
 }
