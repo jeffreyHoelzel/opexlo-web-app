@@ -5,6 +5,7 @@ import { CheckCircle2, X } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
+import { useBodyScrollLock } from "@/components/ui/use-body-scroll-lock";
 
 function getPathWithoutSavedParam(
   pathname: string,
@@ -27,6 +28,9 @@ export function TaskSavedSuccessModal({
   const searchParams = useSearchParams();
   const [dismissed, setDismissed] = useState(false);
   const shouldShowFromQuery = searchParams.get("saved") === "1";
+  const isOpen = shouldShowFromQuery && !dismissed;
+
+  useBodyScrollLock(isOpen);
 
   useEffect(() => {
     if (shouldShowFromQuery) {
@@ -56,7 +60,7 @@ export function TaskSavedSuccessModal({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [dismiss, dismissed, shouldShowFromQuery]);
 
-  if (!shouldShowFromQuery || dismissed) {
+  if (!isOpen) {
     return null;
   }
 

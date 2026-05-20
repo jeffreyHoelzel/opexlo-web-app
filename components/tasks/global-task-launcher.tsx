@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, useTransition } from "react";
-import { ListChecks, Plus, X } from "lucide-react";
+import { ListChecks, Plus, Save, X } from "lucide-react";
 
 import {
   TaskPriorityBadge,
@@ -10,6 +10,7 @@ import {
 import { useTaskLauncher } from "@/components/tasks/task-launcher-context";
 import { TaskForm } from "@/components/tasks/task-form";
 import { Button } from "@/components/ui/button";
+import { useBodyScrollLock } from "@/components/ui/use-body-scroll-lock";
 import { loadTaskModalDataAction } from "@/lib/tasks/actions";
 import type {
   TaskFormOptions,
@@ -24,6 +25,7 @@ type GlobalTaskLauncherProps = {
 };
 
 type ModalMode = "create" | "recent" | "edit";
+const CREATE_TASK_FORM_ID = "global-create-task-form";
 
 function compactMeta(task: TaskListItem) {
   const items = [
@@ -50,7 +52,10 @@ export function GlobalTaskLauncher({
   });
   const [loadError, setLoadError] = useState<string | null>(null);
   const [successPopup, setSuccessPopup] = useState<string | null>(null);
+  const [isCreateSubmitting, setIsCreateSubmitting] = useState(false);
   const [isPending, startTransition] = useTransition();
+
+  useBodyScrollLock(isOpen);
 
   const refreshModalData = useCallback(() => {
     startTransition(async () => {
@@ -99,6 +104,7 @@ export function GlobalTaskLauncher({
   }, [isOpen]);
 
   const openCreate = useCallback(() => {
+    setIsCreateSubmitting(false);
     setEditingTask(null);
     setMode("create");
     setIsOpen(true);
@@ -115,6 +121,7 @@ export function GlobalTaskLauncher({
   }
 
   function handleCreateSuccess() {
+    setIsCreateSubmitting(false);
     refreshModalData();
     setEditingTask(null);
     setMode("create");
@@ -152,7 +159,7 @@ export function GlobalTaskLauncher({
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-foreground/25 p-3 backdrop-blur-sm sm:items-center sm:p-6">
           <div
             aria-modal="true"
-            className="max-h-[92vh] w-full max-w-2xl overflow-hidden rounded-lg border border-border bg-card text-card-foreground shadow-xl"
+            className="flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-border bg-card text-card-foreground shadow-xl sm:max-h-[92vh]"
             role="dialog"
           >
             <div className="flex items-start justify-between gap-4 border-b border-border px-4 py-4 sm:px-6">
@@ -206,7 +213,9 @@ export function GlobalTaskLauncher({
               </div>
             </div>
 
-            <div className="max-h-[68vh] overflow-y-auto px-4 py-5 sm:px-6">
+            <div
+              className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 py-5 sm:px-6"
+            >
               {loadError ? (
                 <p className="mb-4 rounded-md border border-destructive/35 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                   {loadError}
@@ -215,7 +224,10 @@ export function GlobalTaskLauncher({
 
               {mode === "create" ? (
                 <TaskForm
+                  formId={CREATE_TASK_FORM_ID}
+                  hideSubmitButton
                   mode="create"
+                  onPendingChange={setIsCreateSubmitting}
                   onSuccess={handleCreateSuccess}
                   options={modalData.options}
                 />
@@ -273,6 +285,19 @@ export function GlobalTaskLauncher({
                 </div>
               ) : null}
             </div>
+
+            {mode === "create" ? (
+              <div className="shrink-0 border-t border-border bg-card px-4 py-4 sm:flex sm:justify-end sm:px-6">
+                <Button
+                  disabled={isCreateSubmitting}
+                  form={CREATE_TASK_FORM_ID}
+                  type="submit"
+                >
+                  <Save />
+                  {isCreateSubmitting ? "Saving..." : "Create task"}
+                </Button>
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}

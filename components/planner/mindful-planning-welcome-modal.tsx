@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import { CalendarClock, Flag, ListChecks, Sunrise, X } from "lucide-react";
 
 import { Checkbox } from "@/components/ui/checkbox";
@@ -8,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { useBodyScrollLock } from "@/components/ui/use-body-scroll-lock";
 import { saveMindfulPlanningWelcomeAction } from "@/lib/planner/actions";
 import type {
   MindfulPlanningTaskInput,
@@ -106,12 +114,73 @@ function getAvailableMinutes(startTime: string, endTime: string) {
 }
 
 const MODAL_STORAGE_KEY_PREFIX = "opexlo:mindful-plan-welcome:v1";
+const MODAL_SESSION_COOKIE_PREFIX = "opexlo_mindful_plan_welcome_v1";
+
+function getStorageKey(userId: string) {
+  return `${MODAL_STORAGE_KEY_PREFIX}:${userId}`;
+}
+
+function getCookieName(userId: string) {
+  const sanitizedUserId = userId.replace(/[^a-zA-Z0-9_-]/g, "_");
+  return `${MODAL_SESSION_COOKIE_PREFIX}_${sanitizedUserId}`;
+}
+
+function getCookieValue(name: string) {
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  const encodedName = `${encodeURIComponent(name)}=`;
+  const pairs = document.cookie ? document.cookie.split("; ") : [];
+
+  for (const pair of pairs) {
+    if (pair.startsWith(encodedName)) {
+      return decodeURIComponent(pair.slice(encodedName.length));
+    }
+  }
+
+  return null;
+}
+
+function setSessionCookie(name: string, value: string) {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; path=/; samesite=lax`;
+}
+
+function hasSeenInSession(userId: string) {
+  const cookieName = getCookieName(userId);
+
+  if (getCookieValue(cookieName) === "1") {
+    return true;
+  }
+
+  try {
+    return window.sessionStorage.getItem(getStorageKey(userId)) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function markSeenInSession(userId: string) {
+  const cookieName = getCookieName(userId);
+  setSessionCookie(cookieName, "1");
+
+  try {
+    window.sessionStorage.setItem(getStorageKey(userId), "1");
+  } catch {
+    // Ignore storage write failures and rely on session cookie.
+  }
+}
 
 export function MindfulPlanningWelcomeModal({
   bootstrap,
 }: {
   bootstrap: MindfulPlanningWelcomeBootstrap;
 }) {
+  const hasMarkedSeenRef = useRef(false);
   const [isOpen, setIsOpen] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -153,20 +222,33 @@ export function MindfulPlanningWelcomeModal({
     createTaskState(bootstrap.candidateTasks, existingItemsByTaskId),
   );
 
-  const storageKey = `${MODAL_STORAGE_KEY_PREFIX}:${bootstrap.userId}`;
+  const closeModal = useCallback(() => {
+    setIsOpen(false);
+  }, []);
+
+  useBodyScrollLock(isOpen);
 
   useEffect(() => {
-    try {
-      const hasSeenModal = window.localStorage.getItem(storageKey) === "1";
+    if (hasSeenInSession(bootstrap.userId)) {
+      return;
+    }
 
-      if (!hasSeenModal) {
-        window.localStorage.setItem(storageKey, "1");
-        setIsOpen(true);
-      }
+    setIsOpen(true);
+  }, [bootstrap.userId]);
+
+  useEffect(() => {
+    if (!isOpen || hasMarkedSeenRef.current) {
+      return;
+    }
+
+    try {
+      markSeenInSession(bootstrap.userId);
+      hasMarkedSeenRef.current = true;
     } catch {
+      hasMarkedSeenRef.current = true;
       setIsOpen(true);
     }
-  }, [storageKey]);
+  }, [bootstrap.userId, isOpen]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -175,13 +257,13 @@ export function MindfulPlanningWelcomeModal({
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
-        setIsOpen(false);
+        closeModal();
       }
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen]);
+  }, [closeModal, isOpen]);
 
   const selectedTaskPayload = useMemo(
     () => toTaskPayload(selectedTaskIds, taskState),
@@ -209,7 +291,7 @@ export function MindfulPlanningWelcomeModal({
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-foreground/25 p-3 backdrop-blur-sm sm:items-center sm:p-6">
       <div
         aria-modal="true"
-        className="max-h-[92vh] w-full max-w-3xl overflow-hidden rounded-lg border border-border bg-card text-card-foreground shadow-xl"
+        className="flex max-h-full w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-border bg-card text-card-foreground shadow-xl sm:max-h-[92vh]"
         role="dialog"
       >
         <div className="flex items-start justify-between gap-4 border-b border-border px-4 py-4 sm:px-6">
@@ -227,7 +309,7 @@ export function MindfulPlanningWelcomeModal({
           </div>
           <Button
             aria-label="Close daily planning modal"
-            onClick={() => setIsOpen(false)}
+            onClick={closeModal}
             size="icon"
             type="button"
             variant="ghost"
@@ -236,7 +318,7 @@ export function MindfulPlanningWelcomeModal({
           </Button>
         </div>
 
-        <div className="max-h-[72vh] space-y-5 overflow-y-auto px-4 py-5 sm:px-6">
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-5 sm:px-6">
           {error ? (
             <p className="rounded-md border border-destructive/35 bg-destructive/10 px-3 py-2 text-sm text-destructive">
               {error}
@@ -472,11 +554,7 @@ export function MindfulPlanningWelcomeModal({
         </div>
 
         <div className="flex flex-col-reverse gap-3 border-t border-border px-4 py-4 sm:flex-row sm:items-center sm:justify-end sm:px-6">
-          <Button
-            onClick={() => setIsOpen(false)}
-            type="button"
-            variant="ghost"
-          >
+          <Button onClick={closeModal} type="button" variant="ghost">
             Skip for now
           </Button>
           <Button
@@ -501,7 +579,7 @@ export function MindfulPlanningWelcomeModal({
                 }
 
                 setMessage(result.message);
-                setIsOpen(false);
+                closeModal();
               });
             }}
             type="button"
