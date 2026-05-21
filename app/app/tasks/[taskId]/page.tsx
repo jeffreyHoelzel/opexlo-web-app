@@ -8,9 +8,11 @@ import {
   CalendarPlus,
   CheckCircle2,
   Circle,
+  Timer,
   Trash2,
 } from "lucide-react";
 
+import { FocusStartButton } from "@/components/focus/focus-start-button";
 import {
   TaskPriorityBadge,
   TaskStatusBadge,
@@ -154,6 +156,13 @@ export default async function TaskDetailPage({
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">
+              {!isCompleted ? (
+                <FocusStartButton className="w-full" taskId={task.id}>
+                  <Timer />
+                  Start focus
+                </FocusStartButton>
+              ) : null}
+
               <TaskActionForm
                 action={toggleTaskCompletionAction}
                 taskId={task.id}

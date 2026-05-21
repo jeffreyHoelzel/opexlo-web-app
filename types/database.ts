@@ -116,6 +116,57 @@ export type Database = {
         };
         Relationships: [];
       };
+      focus_sessions: {
+        Row: {
+          active_started_at: string | null;
+          created_at: string;
+          duration_minutes: number | null;
+          elapsed_seconds: number;
+          ended_at: string | null;
+          id: string;
+          planned_minutes: number | null;
+          planned_seconds: number | null;
+          session_type: string;
+          started_at: string;
+          status: string;
+          task_id: string | null;
+          updated_at: string;
+          user_id: string;
+        };
+        Insert: {
+          active_started_at?: string | null;
+          created_at?: string;
+          duration_minutes?: number | null;
+          elapsed_seconds?: number;
+          ended_at?: string | null;
+          id?: string;
+          planned_minutes?: number | null;
+          planned_seconds?: number | null;
+          session_type?: string;
+          started_at: string;
+          status?: string;
+          task_id?: string | null;
+          updated_at?: string;
+          user_id: string;
+        };
+        Update: {
+          active_started_at?: string | null;
+          created_at?: string;
+          duration_minutes?: number | null;
+          elapsed_seconds?: number;
+          ended_at?: string | null;
+          id?: string;
+          planned_minutes?: number | null;
+          planned_seconds?: number | null;
+          session_type?: string;
+          started_at?: string;
+          status?: string;
+          task_id?: string | null;
+          updated_at?: string;
+          user_id?: string;
+        };
+        Relationships: [];
+      };
       goals: {
         Row: {
           area_id: string | null;

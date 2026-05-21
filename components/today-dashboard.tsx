@@ -7,6 +7,7 @@ import {
   Target,
 } from "lucide-react";
 
+import { FocusStartButton } from "@/components/focus/focus-start-button";
 import { TaskList } from "@/components/tasks/task-list";
 import { Button } from "@/components/ui/button";
 import {
@@ -102,9 +103,12 @@ export function TodayDashboard({
                     ? `${nextTask.estimated_minutes} minutes planned`
                     : "No estimate set"}
                 </p>
-                <Button asChild className="mt-4 w-full">
-                  <Link href={getTodayTaskHref(nextTask.id)}>Open task</Link>
-                </Button>
+                <div className="mt-4 grid gap-2">
+                  <FocusStartButton className="w-full" taskId={nextTask.id} />
+                  <Button asChild className="w-full" variant="outline">
+                    <Link href={getTodayTaskHref(nextTask.id)}>Open task</Link>
+                  </Button>
+                </div>
               </div>
             ) : (
               <div className="rounded-lg border border-dashed border-border bg-background p-4 text-sm text-muted-foreground">

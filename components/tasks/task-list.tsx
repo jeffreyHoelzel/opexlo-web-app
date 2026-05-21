@@ -7,8 +7,10 @@ import {
   CheckCircle2,
   Circle,
   Pencil,
+  Timer,
 } from "lucide-react";
 
+import { FocusStartButton } from "@/components/focus/focus-start-button";
 import {
   TaskPriorityBadge,
   TaskStatusBadge,
@@ -131,6 +133,7 @@ export function TaskList({
         const isCompleted = task.status === "completed";
         const editTooltipId = `task-${task.id}-edit-tooltip`;
         const archiveTooltipId = `task-${task.id}-archive-tooltip`;
+        const focusTooltipId = `task-${task.id}-focus-tooltip`;
         const todayTooltipId = `task-${task.id}-today-tooltip`;
 
         return (
@@ -180,6 +183,23 @@ export function TaskList({
               </TaskActionForm>
 
               <div className="flex shrink-0 flex-wrap gap-2 lg:justify-end">
+                {!isCompleted ? (
+                  <TaskActionTooltip
+                    content="Start focus"
+                    tooltipId={focusTooltipId}
+                  >
+                    <FocusStartButton
+                      aria-describedby={focusTooltipId}
+                      aria-label="Start focus"
+                      size="icon"
+                      taskId={task.id}
+                      variant="outline"
+                    >
+                      <Timer />
+                    </FocusStartButton>
+                  </TaskActionTooltip>
+                ) : null}
+
                 {showUnplan && task.planned_date ? (
                   <TaskActionTooltip
                     content="Remove from today plan"
