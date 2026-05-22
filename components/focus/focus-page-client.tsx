@@ -2,6 +2,7 @@
 
 import {
   CheckCircle2,
+  Coffee,
   Pause,
   PictureInPicture2,
   Play,
@@ -24,21 +25,19 @@ import {
 import { Label } from "@/components/ui/label";
 import {
   formatFocusClock,
-  getFocusSessionProgressPercent,
+  MAX_DEEP_WORK_DURATION_SECONDS,
+  MAX_POMODORO_BREAK_SECONDS,
+  MAX_POMODORO_DURATION_SECONDS,
   parseFocusClock,
 } from "@/lib/focus/time";
 import type { FocusSessionType } from "@/lib/focus/types";
 import { cn } from "@/lib/utils";
 
-type FocusMode = Extract<
-  FocusSessionType,
-  "pomodoro" | "custom" | "open_focus"
->;
+type FocusMode = FocusSessionType;
 
 const modeLabels: Record<FocusMode, string> = {
+  deep_work: "Deep Work",
   pomodoro: "Pomodoro",
-  custom: "Custom",
-  open_focus: "Open",
 };
 
 function getTaskMeta(task: {
@@ -57,17 +56,17 @@ function getTaskMeta(task: {
 
 export function FocusPageClient() {
   const {
+    activeTimer,
     cancelSession,
     completeSession,
+    defaultBreakSeconds,
     defaultFocusSeconds,
-    elapsedSeconds,
     isPending,
     message,
     openMiniWindow,
     pauseSession,
     recentTasks,
     refreshFocusData,
-    remainingSeconds,
     resumeSession,
     session,
     startSession,
@@ -76,11 +75,11 @@ export function FocusPageClient() {
   const [durationValue, setDurationValue] = useState(
     formatFocusClock(defaultFocusSeconds),
   );
+  const [breakValue, setBreakValue] = useState(
+    formatFocusClock(defaultBreakSeconds),
+  );
   const [selectedTaskId, setSelectedTaskId] = useState("");
   const [durationError, setDurationError] = useState<string | null>(null);
-  const progressPercent = session
-    ? getFocusSessionProgressPercent(session, elapsedSeconds)
-    : 0;
   const selectedTask = useMemo(
     () => recentTasks.find((task) => task.id === selectedTaskId) ?? null,
     [recentTasks, selectedTaskId],
@@ -90,17 +89,38 @@ export function FocusPageClient() {
     setDurationValue(formatFocusClock(defaultFocusSeconds));
   }, [defaultFocusSeconds]);
 
-  function handleStart() {
-    const plannedSeconds =
-      mode === "open_focus" ? null : parseFocusClock(durationValue);
+  useEffect(() => {
+    setBreakValue(formatFocusClock(defaultBreakSeconds));
+  }, [defaultBreakSeconds]);
 
-    if (mode !== "open_focus" && !plannedSeconds) {
-      setDurationError("Use HH:MM:SS with minutes and seconds at 59 or less.");
+  function handleStart() {
+    const plannedSeconds = parseFocusClock(durationValue);
+
+    if (!plannedSeconds) {
+      setDurationError("Use a valid HH:MM:SS duration.");
+      return;
+    }
+
+    if (mode === "pomodoro" && plannedSeconds > MAX_POMODORO_DURATION_SECONDS) {
+      setDurationError("Pomodoro max is 00:55:00.");
+      return;
+    }
+
+    if (mode === "deep_work" && plannedSeconds > MAX_DEEP_WORK_DURATION_SECONDS) {
+      setDurationError("Deep Work max is 12:00:00.");
+      return;
+    }
+
+    const breakSeconds = mode === "pomodoro" ? parseFocusClock(breakValue) : null;
+
+    if (mode === "pomodoro" && (!breakSeconds || breakSeconds > MAX_POMODORO_BREAK_SECONDS)) {
+      setDurationError("Break duration must be between 00:00:01 and 00:10:00.");
       return;
     }
 
     setDurationError(null);
     startSession({
+      breakSeconds,
       plannedSeconds,
       sessionType: mode,
       taskId: selectedTaskId || null,
@@ -134,35 +154,43 @@ export function FocusPageClient() {
         </div>
       ) : null}
 
-      {session ? (
+      {activeTimer ? (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-xl">
-              <Timer className="size-5 text-primary" />
-              {session.task?.title ?? "Open focus"}
+              {activeTimer.isBreak ? (
+                <Coffee className="size-5 text-primary" />
+              ) : (
+                <Timer className="size-5 text-primary" />
+              )}
+              {activeTimer.taskTitle}
             </CardTitle>
             <CardDescription>
-              {modeLabels[session.sessionType as FocusMode] ?? "Focus"} session
+              {activeTimer.isBreak
+                ? "Auto-started Pomodoro break"
+                : `${modeLabels[session?.sessionType ?? "pomodoro"]} session`}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
             <div>
               <p className="font-mono text-6xl font-semibold tabular-nums text-foreground">
-                {remainingSeconds !== null
-                  ? formatFocusClock(remainingSeconds)
-                  : formatFocusClock(elapsedSeconds)}
+                {activeTimer.remainingSeconds !== null
+                  ? formatFocusClock(activeTimer.remainingSeconds)
+                  : formatFocusClock(activeTimer.elapsedSeconds)}
               </p>
               <p className="mt-2 text-sm text-muted-foreground">
-                {remainingSeconds !== null
-                  ? `${formatFocusClock(elapsedSeconds)} elapsed`
-                  : "Elapsed focus time"}
+                {activeTimer.isBreak
+                  ? `${formatFocusClock(activeTimer.elapsedSeconds)} break elapsed`
+                  : activeTimer.remainingSeconds !== null
+                    ? `${formatFocusClock(activeTimer.elapsedSeconds)} elapsed`
+                    : "Elapsed focus time"}
               </p>
             </div>
 
             <div className="h-3 overflow-hidden rounded-full bg-secondary">
               <div
                 className="h-full rounded-full bg-primary transition-[width]"
-                style={{ width: `${progressPercent}%` }}
+                style={{ width: `${activeTimer.progressPercent}%` }}
               />
             </div>
 
@@ -170,13 +198,13 @@ export function FocusPageClient() {
               <Button
                 disabled={isPending}
                 onClick={
-                  session.status === "active" ? pauseSession : resumeSession
+                  activeTimer.status === "active" ? pauseSession : resumeSession
                 }
                 type="button"
                 variant="secondary"
               >
-                {session.status === "active" ? <Pause /> : <Play />}
-                {session.status === "active" ? "Pause" : "Resume"}
+                {activeTimer.status === "active" ? <Pause /> : <Play />}
+                {activeTimer.status === "active" ? "Pause" : "Resume"}
               </Button>
               <Button
                 disabled={isPending}
@@ -185,7 +213,7 @@ export function FocusPageClient() {
                 variant="outline"
               >
                 <CheckCircle2 />
-                Complete
+                {activeTimer.isBreak ? "End break" : "Complete"}
               </Button>
               <Button onClick={openMiniWindow} type="button" variant="outline">
                 <PictureInPicture2 />
@@ -198,7 +226,7 @@ export function FocusPageClient() {
                 variant="ghost"
               >
                 <Square />
-                Stop
+                {activeTimer.isBreak ? "Skip break" : "Stop"}
               </Button>
             </div>
           </CardContent>
@@ -209,7 +237,7 @@ export function FocusPageClient() {
             <CardHeader>
               <CardTitle className="text-xl">Start focus</CardTitle>
               <CardDescription>
-                Pick a task and a session length.
+                Choose Pomodoro or Deep Work, then start.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
@@ -246,14 +274,30 @@ export function FocusPageClient() {
                 </select>
               </div>
 
-              {mode !== "open_focus" ? (
+              <FocusDurationInput
+                hint={
+                  mode === "pomodoro"
+                    ? "HH:MM:SS, max 00:55:00."
+                    : "HH:MM:SS, max 12:00:00."
+                }
+                id="focus-duration"
+                onChange={(value) => {
+                  setDurationValue(value);
+                  setDurationError(null);
+                }}
+                value={durationValue}
+              />
+
+              {mode === "pomodoro" ? (
                 <FocusDurationInput
-                  id="focus-duration"
+                  hint="HH:MM:SS, max 00:10:00."
+                  id="focus-break"
+                  label="Break duration"
                   onChange={(value) => {
-                    setDurationValue(value);
+                    setBreakValue(value);
                     setDurationError(null);
                   }}
-                  value={durationValue}
+                  value={breakValue}
                 />
               ) : null}
 
@@ -294,7 +338,7 @@ export function FocusPageClient() {
         </div>
       )}
 
-      {!session && recentTasks.length > 0 ? (
+      {!activeTimer && recentTasks.length > 0 ? (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Recent tasks</CardTitle>

@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 type FocusDurationInputProps = {
   className?: string;
   disabled?: boolean;
+  hint?: string;
   id: string;
   label?: string;
   onChange: (value: string) => void;
@@ -23,6 +24,7 @@ function getNormalizedClock(value: string) {
 export function FocusDurationInput({
   className,
   disabled,
+  hint = "HH:MM:SS, up to 99:59:59.",
   id,
   label = "Duration",
   onChange,
@@ -48,7 +50,7 @@ export function FocusDurationInput({
         value={value}
       />
       <p className="text-xs text-muted-foreground" id={`${id}-hint`}>
-        HH:MM:SS, up to 99:59:59.
+        {hint}
       </p>
     </div>
   );

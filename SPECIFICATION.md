@@ -204,8 +204,10 @@ The app should help users work through planned tasks with focus.
 Requirements:
 
 - Start a focus timer for a selected task.
-- Support Pomodoro style sessions.
-- Support custom session lengths.
+- Support Pomodoro style custom time length sessions.
+- Pomodoro supports a max duration of 55 minutes followed by a 5 minute break.
+- Support Deep Work style custom time length sessions.
+- Deep Work supports a max of 12 hours followed by no break.
 - Track completed focus time.
 - Provide subtle visual progress.
 - Allow users to pause, resume, or stop a focus session.

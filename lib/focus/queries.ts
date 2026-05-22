@@ -6,12 +6,16 @@ import type {
   FocusSessionType,
   FocusTaskSummary,
 } from "@/lib/focus/types";
+import {
+  DEFAULT_POMODORO_BREAK_SECONDS,
+  MAX_POMODORO_BREAK_SECONDS,
+} from "@/lib/focus/time";
 import { getRecentActiveTasks, getTaskQueryContext } from "@/lib/tasks/queries";
 
 type FocusQueryContext = Awaited<ReturnType<typeof getTaskQueryContext>>;
 
 const DEFAULT_FOCUS_MINUTES = 25;
-const DEFAULT_BREAK_MINUTES = 5;
+const DEFAULT_BREAK_MINUTES = DEFAULT_POMODORO_BREAK_SECONDS / 60;
 
 function toFocusSessionStatus(status: string): FocusSessionStatus {
   if (
@@ -27,15 +31,15 @@ function toFocusSessionStatus(status: string): FocusSessionStatus {
 }
 
 function toFocusSessionType(sessionType: string): FocusSessionType {
-  if (
-    sessionType === "pomodoro" ||
-    sessionType === "custom" ||
-    sessionType === "open_focus"
-  ) {
+  if (sessionType === "pomodoro" || sessionType === "deep_work") {
     return sessionType;
   }
 
-  return "custom";
+  return "deep_work";
+}
+
+function clampBreakSeconds(value: number) {
+  return Math.max(1, Math.min(MAX_POMODORO_BREAK_SECONDS, value));
 }
 
 function toTaskSummary(
@@ -94,6 +98,7 @@ export async function getFocusSessionSnapshot(
 
   return {
     activeStartedAt: row.active_started_at,
+    breakSeconds: row.break_seconds,
     elapsedSeconds: row.elapsed_seconds,
     endedAt: row.ended_at,
     id: row.id,
@@ -147,9 +152,10 @@ export async function getFocusBootstrapData(): Promise<FocusBootstrapData> {
 
   return {
     activeSession,
-    defaultBreakSeconds:
+    defaultBreakSeconds: clampBreakSeconds(
       (preferencesResult.data?.default_break_minutes ?? DEFAULT_BREAK_MINUTES) *
-      60,
+        60,
+    ),
     defaultFocusSeconds:
       (preferencesResult.data?.default_focus_minutes ?? DEFAULT_FOCUS_MINUTES) *
       60,

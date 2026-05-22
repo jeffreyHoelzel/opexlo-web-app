@@ -5,6 +5,10 @@ export const MAX_FOCUS_MINUTES = 59;
 export const MAX_FOCUS_SECONDS = 59;
 export const MAX_FOCUS_DURATION_SECONDS =
   MAX_FOCUS_HOURS * 3600 + MAX_FOCUS_MINUTES * 60 + MAX_FOCUS_SECONDS;
+export const MAX_POMODORO_DURATION_SECONDS = 55 * 60;
+export const MAX_DEEP_WORK_DURATION_SECONDS = 12 * 60 * 60;
+export const MAX_POMODORO_BREAK_SECONDS = 10 * 60;
+export const DEFAULT_POMODORO_BREAK_SECONDS = 5 * 60;
 
 type ClockParts = {
   hours: number;

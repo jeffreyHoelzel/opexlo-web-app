@@ -23,17 +23,18 @@ export function FocusStartButton({
   type = "button",
   ...buttonProps
 }: FocusStartButtonProps) {
-  const { defaultFocusSeconds, isPending, startSession } = useFocusSession();
-  const resolvedPlannedSeconds =
-    sessionType === "open_focus"
-      ? null
-      : (plannedSeconds ?? defaultFocusSeconds);
+  const { defaultBreakSeconds, defaultFocusSeconds, isPending, startSession } =
+    useFocusSession();
+  const resolvedPlannedSeconds = plannedSeconds ?? defaultFocusSeconds;
+  const resolvedBreakSeconds =
+    sessionType === "pomodoro" ? defaultBreakSeconds : null;
 
   return (
     <Button
       disabled={disabled || isPending}
       onClick={() => {
         startSession({
+          breakSeconds: resolvedBreakSeconds,
           plannedSeconds: resolvedPlannedSeconds,
           sessionType,
           taskId: taskId ?? null,

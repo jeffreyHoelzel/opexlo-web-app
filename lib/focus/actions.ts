@@ -4,7 +4,11 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import {
+  DEFAULT_POMODORO_BREAK_SECONDS,
+  MAX_DEEP_WORK_DURATION_SECONDS,
   MAX_FOCUS_DURATION_SECONDS,
+  MAX_POMODORO_BREAK_SECONDS,
+  MAX_POMODORO_DURATION_SECONDS,
   getFocusSessionElapsedSeconds,
 } from "@/lib/focus/time";
 import type {
@@ -20,9 +24,16 @@ import {
 } from "@/lib/focus/queries";
 import { getTaskQueryContext } from "@/lib/tasks/queries";
 
-const focusSessionTypeSchema = z.enum(["pomodoro", "custom", "open_focus"]);
+const focusSessionTypeSchema = z.enum(["pomodoro", "deep_work"]);
 
 const startFocusSessionSchema = z.object({
+  breakSeconds: z
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_POMODORO_BREAK_SECONDS)
+    .nullable()
+    .optional(),
   plannedSeconds: z
     .number()
     .int()
@@ -158,12 +169,35 @@ export async function startFocusSessionAction(
     const values = parsed.data;
     const taskId = await getTaskIdOrThrow(context, values.taskId);
     const now = new Date().toISOString();
-    const plannedSeconds =
-      values.sessionType === "open_focus" ? null : values.plannedSeconds;
+    const plannedSeconds = values.plannedSeconds;
+    const breakSeconds =
+      values.sessionType === "pomodoro"
+        ? (values.breakSeconds ?? DEFAULT_POMODORO_BREAK_SECONDS)
+        : null;
 
-    if (values.sessionType !== "open_focus" && !plannedSeconds) {
+    if (!plannedSeconds) {
       return {
         message: "Choose a focus duration.",
+        status: "error",
+      };
+    }
+
+    if (
+      values.sessionType === "pomodoro" &&
+      plannedSeconds > MAX_POMODORO_DURATION_SECONDS
+    ) {
+      return {
+        message: "Pomodoro sessions can be up to 00:55:00.",
+        status: "error",
+      };
+    }
+
+    if (
+      values.sessionType === "deep_work" &&
+      plannedSeconds > MAX_DEEP_WORK_DURATION_SECONDS
+    ) {
+      return {
+        message: "Deep Work sessions can be up to 12:00:00.",
         status: "error",
       };
     }
@@ -172,10 +206,9 @@ export async function startFocusSessionAction(
       .from("focus_sessions")
       .insert({
         active_started_at: now,
+        break_seconds: breakSeconds,
         elapsed_seconds: 0,
-        planned_minutes: plannedSeconds
-          ? getDurationMinutes(plannedSeconds)
-          : null,
+        planned_minutes: getDurationMinutes(plannedSeconds),
         planned_seconds: plannedSeconds,
         session_type: values.sessionType,
         started_at: now,

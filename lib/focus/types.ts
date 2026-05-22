@@ -9,8 +9,7 @@ export const FOCUS_SESSION_STATUSES = [
 
 export const FOCUS_SESSION_TYPES = [
   "pomodoro",
-  "custom",
-  "open_focus",
+  "deep_work",
 ] as const;
 
 export type FocusSessionStatus = (typeof FOCUS_SESSION_STATUSES)[number];
@@ -30,6 +29,7 @@ export type FocusTaskSummary = {
 
 export type FocusSessionSnapshot = {
   activeStartedAt: string | null;
+  breakSeconds: number | null;
   elapsedSeconds: number;
   endedAt: string | null;
   id: string;
@@ -50,6 +50,7 @@ export type FocusBootstrapData = {
 };
 
 export type StartFocusSessionInput = {
+  breakSeconds?: number | null;
   plannedSeconds?: number | null;
   sessionType?: FocusSessionType;
   taskId?: string | null;

@@ -119,6 +119,7 @@ export type Database = {
       focus_sessions: {
         Row: {
           active_started_at: string | null;
+          break_seconds: number | null;
           created_at: string;
           duration_minutes: number | null;
           elapsed_seconds: number;
@@ -135,6 +136,7 @@ export type Database = {
         };
         Insert: {
           active_started_at?: string | null;
+          break_seconds?: number | null;
           created_at?: string;
           duration_minutes?: number | null;
           elapsed_seconds?: number;
@@ -151,6 +153,7 @@ export type Database = {
         };
         Update: {
           active_started_at?: string | null;
+          break_seconds?: number | null;
           created_at?: string;
           duration_minutes?: number | null;
           elapsed_seconds?: number;
