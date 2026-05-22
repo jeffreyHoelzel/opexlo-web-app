@@ -4,7 +4,6 @@ import {
   CheckCircle2,
   Coffee,
   Pause,
-  PictureInPicture2,
   Play,
   RotateCw,
   Square,
@@ -62,8 +61,6 @@ export function FocusPageClient() {
     defaultBreakSeconds,
     defaultFocusSeconds,
     isPending,
-    message,
-    openMiniWindow,
     pauseSession,
     recentTasks,
     refreshFocusData,
@@ -106,14 +103,21 @@ export function FocusPageClient() {
       return;
     }
 
-    if (mode === "deep_work" && plannedSeconds > MAX_DEEP_WORK_DURATION_SECONDS) {
+    if (
+      mode === "deep_work" &&
+      plannedSeconds > MAX_DEEP_WORK_DURATION_SECONDS
+    ) {
       setDurationError("Deep Work max is 12:00:00.");
       return;
     }
 
-    const breakSeconds = mode === "pomodoro" ? parseFocusClock(breakValue) : null;
+    const breakSeconds =
+      mode === "pomodoro" ? parseFocusClock(breakValue) : null;
 
-    if (mode === "pomodoro" && (!breakSeconds || breakSeconds > MAX_POMODORO_BREAK_SECONDS)) {
+    if (
+      mode === "pomodoro" &&
+      (!breakSeconds || breakSeconds > MAX_POMODORO_BREAK_SECONDS)
+    ) {
       setDurationError("Break duration must be between 00:00:01 and 00:10:00.");
       return;
     }
@@ -143,16 +147,6 @@ export function FocusPageClient() {
           Refresh
         </Button>
       </div>
-
-      {message ? (
-        <div
-          aria-live="polite"
-          className="rounded-md border border-border bg-card px-3 py-2 text-sm text-card-foreground"
-          role="status"
-        >
-          {message}
-        </div>
-      ) : null}
 
       {activeTimer ? (
         <Card>
@@ -214,10 +208,6 @@ export function FocusPageClient() {
               >
                 <CheckCircle2 />
                 {activeTimer.isBreak ? "End break" : "Complete"}
-              </Button>
-              <Button onClick={openMiniWindow} type="button" variant="outline">
-                <PictureInPicture2 />
-                Mini-window
               </Button>
               <Button
                 disabled={isPending}

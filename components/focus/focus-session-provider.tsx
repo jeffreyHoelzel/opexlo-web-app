@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 import {
   CheckCircle2,
   Coffee,
@@ -10,6 +10,7 @@ import {
   Play,
   Square,
   Timer,
+  X,
 } from "lucide-react";
 import {
   createContext,
@@ -75,6 +76,7 @@ type FocusSessionContextValue = {
   defaultFocusSeconds: number;
   isPending: boolean;
   message: string | null;
+  openFocusView: () => void;
   openMiniWindow: () => void;
   pauseSession: () => void;
   recentTasks: FocusTaskSummary[];
@@ -247,7 +249,10 @@ function getActiveTimerSnapshot({
       isBreak: false,
       modeLabel: getSessionModeLabel(session),
       progressPercent: getFocusSessionProgressPercent(session, elapsedSeconds),
-      remainingSeconds: getFocusSessionRemainingSeconds(session, elapsedSeconds),
+      remainingSeconds: getFocusSessionRemainingSeconds(
+        session,
+        elapsedSeconds,
+      ),
       status,
       taskTitle: getSessionTitle(session),
     };
@@ -441,7 +446,8 @@ function syncMiniWindow({
   }
 
   if (pauseResume) {
-    pauseResume.textContent = activeTimer.status === "active" ? "Pause" : "Resume";
+    pauseResume.textContent =
+      activeTimer.status === "active" ? "Pause" : "Resume";
     pauseResume.onclick = activeTimer.status === "active" ? onPause : onResume;
   }
 
@@ -463,6 +469,9 @@ export function FocusSessionProvider({
   bootstrap: FocusBootstrapData;
   children: ReactNode;
 }) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const isFocusRoute = pathname === "/app/focus";
   const [session, setSession] = useState(bootstrap.activeSession);
   const [breakSession, setBreakSession] = useState<BreakSessionState | null>(
     null,
@@ -482,6 +491,26 @@ export function FocusSessionProvider({
     () => getActiveTimerSnapshot({ breakSession, nowMs: now, session }),
     [breakSession, now, session],
   );
+  const dismissMessage = useCallback(() => {
+    setMessage(null);
+  }, []);
+  const closeMiniWindow = useCallback(() => {
+    const miniWindow = miniWindowRef.current;
+
+    if (!miniWindow) {
+      return;
+    }
+
+    if (!miniWindow.closed) {
+      miniWindow.close();
+    }
+
+    miniWindowRef.current = null;
+  }, []);
+  const openFocusView = useCallback(() => {
+    closeMiniWindow();
+    router.push("/app/focus");
+  }, [closeMiniWindow, router]);
 
   useEffect(() => {
     focusTickStore.setEnabled(activeTimer?.status === "active");
@@ -497,6 +526,21 @@ export function FocusSessionProvider({
     }, 3200);
 
     return () => window.clearTimeout(timeout);
+  }, [message]);
+
+  useEffect(() => {
+    if (!message) {
+      return;
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setMessage(null);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, [message]);
 
   const handleFocusResult = useCallback((result: FocusActionResult) => {
@@ -597,56 +641,65 @@ export function FocusSessionProvider({
     });
   }, [breakSession, handleFocusResult, session]);
 
-  const completeSession = useCallback((source: CompleteSessionSource = "manual") => {
-    if (breakSession) {
-      setBreakSession(null);
-      setMessage("Break complete.");
-      return;
-    }
-
-    if (!session) {
-      return;
-    }
-
-    const sessionSnapshot = session;
-
-    startTransition(async () => {
-      const result = await completeFocusSessionAction(sessionSnapshot.id);
-      handleFocusResult(result);
-
-      if (result.status === "error") {
-        if (
-          source === "auto" &&
-          autoCompletedSessionIdRef.current === sessionSnapshot.id
-        ) {
-          autoCompletedSessionIdRef.current = null;
-        }
-
+  const completeSession = useCallback(
+    (source: CompleteSessionSource = "manual") => {
+      if (breakSession) {
+        setBreakSession(null);
+        setMessage("Break complete.");
         return;
       }
 
-      refreshFocusData();
-
-      if (sessionSnapshot.sessionType === "pomodoro") {
-        const breakSeconds =
-          sessionSnapshot.breakSeconds ?? bootstrap.defaultBreakSeconds;
-        setBreakSession({
-          activeStartedAt: new Date().toISOString(),
-          elapsedSeconds: 0,
-          plannedSeconds: breakSeconds,
-          status: "active",
-          taskTitle: sessionSnapshot.task?.title ?? null,
-        });
-        setMessage("Pomodoro complete. Break started.");
-      } else if (source === "auto") {
-        setMessage("Session complete.");
+      if (!session) {
+        return;
       }
 
-      if (autoCompletedSessionIdRef.current === sessionSnapshot.id) {
-        autoCompletedSessionIdRef.current = null;
-      }
-    });
-  }, [bootstrap.defaultBreakSeconds, breakSession, handleFocusResult, refreshFocusData, session]);
+      const sessionSnapshot = session;
+
+      startTransition(async () => {
+        const result = await completeFocusSessionAction(sessionSnapshot.id);
+        handleFocusResult(result);
+
+        if (result.status === "error") {
+          if (
+            source === "auto" &&
+            autoCompletedSessionIdRef.current === sessionSnapshot.id
+          ) {
+            autoCompletedSessionIdRef.current = null;
+          }
+
+          return;
+        }
+
+        refreshFocusData();
+
+        if (sessionSnapshot.sessionType === "pomodoro") {
+          const breakSeconds =
+            sessionSnapshot.breakSeconds ?? bootstrap.defaultBreakSeconds;
+          setBreakSession({
+            activeStartedAt: new Date().toISOString(),
+            elapsedSeconds: 0,
+            plannedSeconds: breakSeconds,
+            status: "active",
+            taskTitle: sessionSnapshot.task?.title ?? null,
+          });
+          setMessage("Pomodoro complete. Break started.");
+        } else if (source === "auto") {
+          setMessage("Session complete.");
+        }
+
+        if (autoCompletedSessionIdRef.current === sessionSnapshot.id) {
+          autoCompletedSessionIdRef.current = null;
+        }
+      });
+    },
+    [
+      bootstrap.defaultBreakSeconds,
+      breakSession,
+      handleFocusResult,
+      refreshFocusData,
+      session,
+    ],
+  );
 
   const cancelSession = useCallback(() => {
     if (breakSession) {
@@ -692,6 +745,11 @@ export function FocusSessionProvider({
       return;
     }
 
+    if (isFocusRoute) {
+      closeMiniWindow();
+      return;
+    }
+
     if (miniWindowRef.current && !miniWindowRef.current.closed) {
       miniWindowRef.current.focus();
       return;
@@ -718,7 +776,15 @@ export function FocusSessionProvider({
     }
 
     openFallbackPopup();
-  }, [activeTimer, openFallbackPopup]);
+  }, [activeTimer, closeMiniWindow, isFocusRoute, openFallbackPopup]);
+
+  useEffect(() => {
+    if (!isFocusRoute) {
+      return;
+    }
+
+    closeMiniWindow();
+  }, [closeMiniWindow, isFocusRoute]);
 
   useEffect(() => {
     const miniWindow = miniWindowRef.current;
@@ -729,8 +795,7 @@ export function FocusSessionProvider({
     }
 
     if (!activeTimer) {
-      miniWindow.close();
-      miniWindowRef.current = null;
+      closeMiniWindow();
       return;
     }
 
@@ -745,11 +810,19 @@ export function FocusSessionProvider({
   }, [
     activeTimer,
     cancelSession,
+    closeMiniWindow,
     completeSession,
     miniWindowVersion,
     pauseSession,
     resumeSession,
   ]);
+
+  useEffect(
+    () => () => {
+      closeMiniWindow();
+    },
+    [closeMiniWindow],
+  );
 
   useEffect(() => {
     if (!breakSession) {
@@ -775,7 +848,10 @@ export function FocusSessionProvider({
       return;
     }
 
-    if (activeTimer.remainingSeconds === null || activeTimer.remainingSeconds > 0) {
+    if (
+      activeTimer.remainingSeconds === null ||
+      activeTimer.remainingSeconds > 0
+    ) {
       return;
     }
 
@@ -785,11 +861,7 @@ export function FocusSessionProvider({
 
     autoCompletedSessionIdRef.current = session.id;
     completeSession("auto");
-  }, [
-    activeTimer,
-    completeSession,
-    session,
-  ]);
+  }, [activeTimer, completeSession, session]);
 
   const value = useMemo(
     () => ({
@@ -800,6 +872,7 @@ export function FocusSessionProvider({
       defaultFocusSeconds: bootstrap.defaultFocusSeconds,
       isPending,
       message,
+      openFocusView,
       openMiniWindow,
       pauseSession,
       recentTasks,
@@ -816,6 +889,7 @@ export function FocusSessionProvider({
       bootstrap.defaultFocusSeconds,
       isPending,
       message,
+      openFocusView,
       openMiniWindow,
       pauseSession,
       recentTasks,
@@ -829,8 +903,52 @@ export function FocusSessionProvider({
   return (
     <FocusSessionContext.Provider value={value}>
       {children}
-      <FocusSessionDock />
+      {!isFocusRoute ? <FocusSessionDock /> : null}
+      <FocusSessionMessageOverlay
+        message={message}
+        onDismiss={dismissMessage}
+      />
     </FocusSessionContext.Provider>
+  );
+}
+
+function FocusSessionMessageOverlay({
+  message,
+  onDismiss,
+}: {
+  message: string | null;
+  onDismiss: () => void;
+}) {
+  if (!message) {
+    return null;
+  }
+
+  return (
+    <div
+      aria-live="polite"
+      className="pointer-events-none fixed inset-0 z-50 flex items-end justify-end p-4 sm:p-6"
+      role="status"
+    >
+      <div className="pointer-events-auto w-full max-w-sm rounded-lg border border-border bg-card p-4 text-card-foreground shadow-xl">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="mt-0.5 rounded-full bg-[hsl(var(--chart-3))]/25 p-1.5 text-[hsl(var(--chart-3))]">
+              <CheckCircle2 className="size-4" />
+            </span>
+            <p className="text-sm text-muted-foreground">{message}</p>
+          </div>
+          <Button
+            aria-label="Close focus message"
+            onClick={onDismiss}
+            size="icon"
+            type="button"
+            variant="ghost"
+          >
+            <X />
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -840,27 +958,21 @@ function FocusSessionDock() {
     cancelSession,
     completeSession,
     isPending,
-    message,
+    openFocusView,
     openMiniWindow,
     pauseSession,
     resumeSession,
   } = useFocusSession();
 
   if (!activeTimer) {
-    return message ? (
-      <div
-        aria-live="polite"
-        className="fixed bottom-20 right-5 z-50 max-w-sm rounded-md border border-border bg-card px-3 py-2 text-sm text-card-foreground shadow-lg sm:bottom-24 sm:right-8"
-        role="status"
-      >
-        {message}
-      </div>
-    ) : null;
+    return null;
   }
 
   return (
     <aside
-      aria-label={activeTimer.isBreak ? "Active break timer" : "Active focus session"}
+      aria-label={
+        activeTimer.isBreak ? "Active break timer" : "Active focus session"
+      }
       className="fixed bottom-20 right-5 z-40 w-[calc(100vw-2.5rem)] max-w-sm overflow-hidden rounded-lg border border-border bg-card text-card-foreground shadow-xl sm:bottom-24 sm:right-8"
     >
       <div className="border-b border-border px-4 py-3">
@@ -878,10 +990,14 @@ function FocusSessionDock() {
               {activeTimer.taskTitle}
             </h2>
           </div>
-          <Button asChild size="icon" variant="ghost">
-            <Link aria-label="Open full focus view" href="/app/focus">
-              <Maximize2 />
-            </Link>
+          <Button
+            aria-label="Open full focus view"
+            onClick={openFocusView}
+            size="icon"
+            type="button"
+            variant="ghost"
+          >
+            <Maximize2 />
           </Button>
         </div>
       </div>
@@ -909,12 +1025,6 @@ function FocusSessionDock() {
           />
         </div>
 
-        {message ? (
-          <p className="rounded-md border border-border bg-background px-2 py-1 text-xs text-muted-foreground">
-            {message}
-          </p>
-        ) : null}
-
         <div className="grid grid-cols-5 gap-2">
           <Button
             aria-label={
@@ -922,7 +1032,9 @@ function FocusSessionDock() {
             }
             className="col-span-2"
             disabled={isPending}
-            onClick={activeTimer.status === "active" ? pauseSession : resumeSession}
+            onClick={
+              activeTimer.status === "active" ? pauseSession : resumeSession
+            }
             type="button"
             variant="secondary"
           >
@@ -930,7 +1042,9 @@ function FocusSessionDock() {
             {activeTimer.status === "active" ? "Pause" : "Resume"}
           </Button>
           <Button
-            aria-label={activeTimer.isBreak ? "End break" : "Complete focus session"}
+            aria-label={
+              activeTimer.isBreak ? "End break" : "Complete focus session"
+            }
             disabled={isPending}
             onClick={completeSession}
             size="icon"
@@ -949,7 +1063,9 @@ function FocusSessionDock() {
             <PictureInPicture2 />
           </Button>
           <Button
-            aria-label={activeTimer.isBreak ? "Skip break" : "Stop focus session"}
+            aria-label={
+              activeTimer.isBreak ? "Skip break" : "Stop focus session"
+            }
             disabled={isPending}
             onClick={cancelSession}
             size="icon"
@@ -968,7 +1084,9 @@ export function useFocusSession() {
   const context = useContext(FocusSessionContext);
 
   if (!context) {
-    throw new Error("useFocusSession must be used within FocusSessionProvider.");
+    throw new Error(
+      "useFocusSession must be used within FocusSessionProvider.",
+    );
   }
 
   return context;
