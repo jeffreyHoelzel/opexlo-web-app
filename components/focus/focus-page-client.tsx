@@ -13,6 +13,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { FocusDurationInput } from "@/components/focus/focus-duration-input";
 import { useFocusSession } from "@/components/focus/focus-session-provider";
+import { ActionTooltip } from "@/components/ui/action-tooltip";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -21,18 +22,21 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { FieldHelpTooltip } from "@/components/ui/field-help-tooltip";
 import { Label } from "@/components/ui/label";
 import {
   formatFocusClock,
   MAX_DEEP_WORK_DURATION_SECONDS,
   MAX_POMODORO_BREAK_SECONDS,
   MAX_POMODORO_DURATION_SECONDS,
-  parseFocusClock,
 } from "@/lib/focus/time";
 import type { FocusSessionType } from "@/lib/focus/types";
 import { cn } from "@/lib/utils";
 
 type FocusMode = FocusSessionType;
+
+const focusModes: FocusMode[] = ["pomodoro", "deep_work"];
 
 const modeLabels: Record<FocusMode, string> = {
   deep_work: "Deep Work",
@@ -53,6 +57,27 @@ function getTaskMeta(task: {
     .join(" | ");
 }
 
+function getMaxDurationSeconds(mode: FocusMode) {
+  return mode === "pomodoro"
+    ? MAX_POMODORO_DURATION_SECONDS
+    : MAX_DEEP_WORK_DURATION_SECONDS;
+}
+
+function FieldLabelWithHelp({
+  fieldLabel,
+  helpText,
+}: {
+  fieldLabel: string;
+  helpText: string;
+}) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="text-sm font-medium leading-none">{fieldLabel}</span>
+      <FieldHelpTooltip content={helpText} fieldLabel={fieldLabel} />
+    </div>
+  );
+}
+
 export function FocusPageClient() {
   const {
     activeTimer,
@@ -69,54 +94,85 @@ export function FocusPageClient() {
     startSession,
   } = useFocusSession();
   const [mode, setMode] = useState<FocusMode>("pomodoro");
-  const [durationValue, setDurationValue] = useState(
-    formatFocusClock(defaultFocusSeconds),
-  );
-  const [breakValue, setBreakValue] = useState(
-    formatFocusClock(defaultBreakSeconds),
-  );
-  const [selectedTaskId, setSelectedTaskId] = useState("");
+  const [durationSeconds, setDurationSeconds] = useState(defaultFocusSeconds);
+  const [breakSeconds, setBreakSeconds] = useState(defaultBreakSeconds);
+  const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
   const [durationError, setDurationError] = useState<string | null>(null);
-  const selectedTask = useMemo(
-    () => recentTasks.find((task) => task.id === selectedTaskId) ?? null,
-    [recentTasks, selectedTaskId],
+  const recentTasksById = useMemo(
+    () => new Map(recentTasks.map((task) => [task.id, task])),
+    [recentTasks],
+  );
+  const selectedTaskIdSet = useMemo(
+    () => new Set(selectedTaskIds),
+    [selectedTaskIds],
+  );
+  const selectedTasks = useMemo(
+    () =>
+      selectedTaskIds
+        .map((taskId) => recentTasksById.get(taskId) ?? null)
+        .filter((task) => task !== null),
+    [recentTasksById, selectedTaskIds],
   );
 
   useEffect(() => {
-    setDurationValue(formatFocusClock(defaultFocusSeconds));
+    setDurationSeconds((current) =>
+      Math.min(defaultFocusSeconds, current || defaultFocusSeconds),
+    );
   }, [defaultFocusSeconds]);
 
   useEffect(() => {
-    setBreakValue(formatFocusClock(defaultBreakSeconds));
+    setBreakSeconds(defaultBreakSeconds);
   }, [defaultBreakSeconds]);
 
-  function handleStart() {
-    const plannedSeconds = parseFocusClock(durationValue);
+  useEffect(() => {
+    setSelectedTaskIds((current) =>
+      current.filter((taskId) => recentTasksById.has(taskId)),
+    );
+  }, [recentTasksById]);
 
-    if (!plannedSeconds) {
-      setDurationError("Use a valid HH:MM:SS duration.");
+  function handleModeChange(nextMode: FocusMode) {
+    setMode(nextMode);
+    setDurationSeconds((current) =>
+      Math.min(current, getMaxDurationSeconds(nextMode)),
+    );
+    setDurationError(null);
+  }
+
+  function handleTaskCheckedChange(taskId: string, checked: boolean) {
+    setSelectedTaskIds((current) => {
+      if (checked) {
+        return current.includes(taskId) ? current : [...current, taskId];
+      }
+
+      return current.filter((currentTaskId) => currentTaskId !== taskId);
+    });
+  }
+
+  function handleStart() {
+    if (durationSeconds <= 0) {
+      setDurationError("Choose a focus duration.");
       return;
     }
 
-    if (mode === "pomodoro" && plannedSeconds > MAX_POMODORO_DURATION_SECONDS) {
+    if (
+      mode === "pomodoro" &&
+      durationSeconds > MAX_POMODORO_DURATION_SECONDS
+    ) {
       setDurationError("Pomodoro max is 00:55:00.");
       return;
     }
 
     if (
       mode === "deep_work" &&
-      plannedSeconds > MAX_DEEP_WORK_DURATION_SECONDS
+      durationSeconds > MAX_DEEP_WORK_DURATION_SECONDS
     ) {
       setDurationError("Deep Work max is 12:00:00.");
       return;
     }
 
-    const breakSeconds =
-      mode === "pomodoro" ? parseFocusClock(breakValue) : null;
-
     if (
       mode === "pomodoro" &&
-      (!breakSeconds || breakSeconds > MAX_POMODORO_BREAK_SECONDS)
+      (breakSeconds <= 0 || breakSeconds > MAX_POMODORO_BREAK_SECONDS)
     ) {
       setDurationError("Break duration must be between 00:00:01 and 00:10:00.");
       return;
@@ -124,12 +180,16 @@ export function FocusPageClient() {
 
     setDurationError(null);
     startSession({
-      breakSeconds,
-      plannedSeconds,
+      breakSeconds: mode === "pomodoro" ? breakSeconds : null,
+      plannedSeconds: durationSeconds,
       sessionType: mode,
-      taskId: selectedTaskId || null,
+      taskId: selectedTaskIds[0] ?? null,
+      taskIds: selectedTaskIds,
     });
   }
+
+  const pauseResumeLabel =
+    activeTimer?.status === "active" ? "Pause timer" : "Resume timer";
 
   return (
     <section className="mx-auto w-full max-w-6xl space-y-6">
@@ -142,10 +202,20 @@ export function FocusPageClient() {
             Stay with one session.
           </h1>
         </div>
-        <Button onClick={refreshFocusData} type="button" variant="outline">
-          <RotateCw />
-          Refresh
-        </Button>
+        <ActionTooltip
+          content="Reload the active timer and recent tasks"
+          tooltipId="focus-refresh-tooltip"
+        >
+          <Button
+            aria-describedby="focus-refresh-tooltip"
+            onClick={refreshFocusData}
+            type="button"
+            variant="outline"
+          >
+            <RotateCw />
+            Refresh
+          </Button>
+        </ActionTooltip>
       </div>
 
       {activeTimer ? (
@@ -189,35 +259,59 @@ export function FocusPageClient() {
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <Button
-                disabled={isPending}
-                onClick={
-                  activeTimer.status === "active" ? pauseSession : resumeSession
+              <ActionTooltip
+                content={pauseResumeLabel}
+                tooltipId="focus-active-pause-resume-tooltip"
+              >
+                <Button
+                  aria-describedby="focus-active-pause-resume-tooltip"
+                  disabled={isPending}
+                  onClick={
+                    activeTimer.status === "active"
+                      ? pauseSession
+                      : resumeSession
+                  }
+                  type="button"
+                  variant="secondary"
+                >
+                  {activeTimer.status === "active" ? <Pause /> : <Play />}
+                  {activeTimer.status === "active" ? "Pause" : "Resume"}
+                </Button>
+              </ActionTooltip>
+              <ActionTooltip
+                content={
+                  activeTimer.isBreak ? "End the break" : "Complete the session"
                 }
-                type="button"
-                variant="secondary"
+                tooltipId="focus-active-complete-tooltip"
               >
-                {activeTimer.status === "active" ? <Pause /> : <Play />}
-                {activeTimer.status === "active" ? "Pause" : "Resume"}
-              </Button>
-              <Button
-                disabled={isPending}
-                onClick={completeSession}
-                type="button"
-                variant="outline"
+                <Button
+                  aria-describedby="focus-active-complete-tooltip"
+                  disabled={isPending}
+                  onClick={completeSession}
+                  type="button"
+                  variant="outline"
+                >
+                  <CheckCircle2 />
+                  {activeTimer.isBreak ? "End break" : "Complete"}
+                </Button>
+              </ActionTooltip>
+              <ActionTooltip
+                content={
+                  activeTimer.isBreak ? "Skip the break" : "Stop the session"
+                }
+                tooltipId="focus-active-stop-tooltip"
               >
-                <CheckCircle2 />
-                {activeTimer.isBreak ? "End break" : "Complete"}
-              </Button>
-              <Button
-                disabled={isPending}
-                onClick={cancelSession}
-                type="button"
-                variant="ghost"
-              >
-                <Square />
-                {activeTimer.isBreak ? "Skip break" : "Stop"}
-              </Button>
+                <Button
+                  aria-describedby="focus-active-stop-tooltip"
+                  disabled={isPending}
+                  onClick={cancelSession}
+                  type="button"
+                  variant="ghost"
+                >
+                  <Square />
+                  {activeTimer.isBreak ? "Skip break" : "Stop"}
+                </Button>
+              </ActionTooltip>
             </div>
           </CardContent>
         </Card>
@@ -231,63 +325,122 @@ export function FocusPageClient() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
-              <div className="inline-flex rounded-md border border-border bg-background p-1">
-                {(Object.keys(modeLabels) as FocusMode[]).map((item) => (
-                  <button
-                    className={cn(
-                      "inline-flex h-9 items-center rounded-sm px-3 text-sm font-medium text-muted-foreground transition-colors",
-                      mode === item && "bg-card text-primary shadow-sm",
-                    )}
-                    key={item}
-                    onClick={() => setMode(item)}
-                    type="button"
-                  >
-                    {modeLabels[item]}
-                  </button>
-                ))}
+              <div className="space-y-2">
+                <FieldLabelWithHelp
+                  fieldLabel="Mode"
+                  helpText="Pomodoro caps focus at 55 minutes and starts a break. Deep Work supports longer focus without a break."
+                />
+                <div className="inline-flex rounded-md border border-border bg-background p-1">
+                  {focusModes.map((item) => {
+                    const tooltipId = `focus-mode-${item}-tooltip`;
+
+                    return (
+                      <ActionTooltip
+                        align="center"
+                        content={`Use ${modeLabels[item]} timing`}
+                        key={item}
+                        tooltipId={tooltipId}
+                      >
+                        <button
+                          aria-describedby={tooltipId}
+                          className={cn(
+                            "inline-flex h-9 items-center rounded-sm px-3 text-sm font-medium text-muted-foreground transition-colors",
+                            mode === item && "bg-card text-primary shadow-sm",
+                          )}
+                          id={`focus-mode-${item}`}
+                          onClick={() => handleModeChange(item)}
+                          type="button"
+                        >
+                          {modeLabels[item]}
+                        </button>
+                      </ActionTooltip>
+                    );
+                  })}
+                </div>
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="focus-task">Task</Label>
-                <select
-                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                  id="focus-task"
-                  onChange={(event) => setSelectedTaskId(event.target.value)}
-                  value={selectedTaskId}
-                >
-                  <option value="">No linked task</option>
-                  {recentTasks.map((task) => (
-                    <option key={task.id} value={task.id}>
-                      {task.title}
-                    </option>
-                  ))}
-                </select>
+                <FieldLabelWithHelp
+                  fieldLabel="Tasks"
+                  helpText="Link one or more active tasks to track what this focus session supports."
+                />
+                {recentTasks.length > 0 ? (
+                  <div className="grid max-h-72 gap-2 overflow-y-auto pr-1">
+                    {recentTasks.map((task) => {
+                      const isSelected = selectedTaskIdSet.has(task.id);
+                      const checkboxId = `focus-task-${task.id}`;
+                      const tooltipId = `focus-task-${task.id}-tooltip`;
+
+                      return (
+                        <div
+                          className={cn(
+                            "flex items-start gap-3 rounded-lg border border-border bg-card p-3 transition-colors hover:bg-secondary/55",
+                            isSelected && "border-primary/55 bg-secondary/65",
+                          )}
+                          key={task.id}
+                        >
+                          <Checkbox
+                            aria-describedby={tooltipId}
+                            checked={isSelected}
+                            className="mt-0.5"
+                            id={checkboxId}
+                            onCheckedChange={(checked) => {
+                              handleTaskCheckedChange(
+                                task.id,
+                                checked === true,
+                              );
+                            }}
+                          />
+                          <Label
+                            className="min-w-0 flex-1 cursor-pointer text-sm font-medium leading-5 text-foreground"
+                            htmlFor={checkboxId}
+                          >
+                            <span className="block truncate">
+                              {task.title}
+                            </span>
+                            <span className="mt-1 block text-xs font-normal leading-5 text-muted-foreground">
+                              {getTaskMeta(task)}
+                            </span>
+                          </Label>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="rounded-lg border border-dashed border-border bg-background px-4 py-6 text-sm text-muted-foreground">
+                    No active tasks are available to link.
+                  </p>
+                )}
               </div>
 
               <FocusDurationInput
-                hint={
+                helpText={
                   mode === "pomodoro"
-                    ? "HH:MM:SS, max 00:55:00."
-                    : "HH:MM:SS, max 12:00:00."
+                    ? "Set the focus length. Pomodoro sessions can be up to 55 minutes."
+                    : "Set the focus length. Deep Work sessions can be up to 12 hours."
                 }
+                hint={mode === "pomodoro" ? "Max 00:55:00." : "Max 12:00:00."}
                 id="focus-duration"
+                maxSeconds={getMaxDurationSeconds(mode)}
                 onChange={(value) => {
-                  setDurationValue(value);
+                  setDurationSeconds(value);
                   setDurationError(null);
                 }}
-                value={durationValue}
+                value={durationSeconds}
               />
 
               {mode === "pomodoro" ? (
                 <FocusDurationInput
-                  hint="HH:MM:SS, max 00:10:00."
+                  helpText="Set the short break that starts after the Pomodoro completes."
+                  hint="Max 00:10:00."
                   id="focus-break"
                   label="Break duration"
+                  maxSeconds={MAX_POMODORO_BREAK_SECONDS}
                   onChange={(value) => {
-                    setBreakValue(value);
+                    setBreakSeconds(value);
                     setDurationError(null);
                   }}
-                  value={breakValue}
+                  value={breakSeconds}
                 />
               ) : null}
 
@@ -297,26 +450,44 @@ export function FocusPageClient() {
                 </p>
               ) : null}
 
-              <Button disabled={isPending} onClick={handleStart} type="button">
-                <Timer />
-                Start session
-              </Button>
+              <ActionTooltip
+                align="left"
+                content="Start a focus timer with these settings"
+                tooltipId="focus-start-session-tooltip"
+              >
+                <Button
+                  aria-describedby="focus-start-session-tooltip"
+                  disabled={isPending}
+                  onClick={handleStart}
+                  type="button"
+                >
+                  <Timer />
+                  Start session
+                </Button>
+              </ActionTooltip>
             </CardContent>
           </Card>
 
           <Card className="self-start">
             <CardHeader>
-              <CardTitle className="text-base">Selected task</CardTitle>
+              <CardTitle className="text-base">Selected tasks</CardTitle>
             </CardHeader>
             <CardContent>
-              {selectedTask ? (
-                <div className="rounded-lg border border-border bg-secondary/65 p-4">
-                  <p className="text-sm font-medium text-foreground">
-                    {selectedTask.title}
-                  </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {getTaskMeta(selectedTask)}
-                  </p>
+              {selectedTasks.length > 0 ? (
+                <div className="space-y-2">
+                  {selectedTasks.map((task) => (
+                    <div
+                      className="rounded-lg border border-border bg-secondary/65 p-3"
+                      key={task.id}
+                    >
+                      <p className="truncate text-sm font-medium text-foreground">
+                        {task.title}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {getTaskMeta(task)}
+                      </p>
+                    </div>
+                  ))}
                 </div>
               ) : (
                 <p className="text-sm text-muted-foreground">
@@ -327,31 +498,6 @@ export function FocusPageClient() {
           </Card>
         </div>
       )}
-
-      {!activeTimer && recentTasks.length > 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Recent tasks</CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-3 md:grid-cols-2">
-            {recentTasks.map((task) => (
-              <button
-                className="rounded-lg border border-border bg-card p-4 text-left transition-colors hover:bg-secondary/55"
-                key={task.id}
-                onClick={() => setSelectedTaskId(task.id)}
-                type="button"
-              >
-                <span className="block text-sm font-medium text-foreground">
-                  {task.title}
-                </span>
-                <span className="mt-1 block text-xs text-muted-foreground">
-                  {getTaskMeta(task)}
-                </span>
-              </button>
-            ))}
-          </CardContent>
-        </Card>
-      ) : null}
     </section>
   );
 }

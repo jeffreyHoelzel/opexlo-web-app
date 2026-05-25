@@ -10,7 +10,11 @@ import {
   DEFAULT_POMODORO_BREAK_SECONDS,
   MAX_POMODORO_BREAK_SECONDS,
 } from "@/lib/focus/time";
-import { getRecentActiveTasks, getTaskQueryContext } from "@/lib/tasks/queries";
+import {
+  getRecentActiveTasks,
+  getTaskOptions,
+  getTaskQueryContext,
+} from "@/lib/tasks/queries";
 
 type FocusQueryContext = Awaited<ReturnType<typeof getTaskQueryContext>>;
 
@@ -68,33 +72,88 @@ function toTaskSummary(
   };
 }
 
-async function getTaskSummaryById(
+async function getTaskSummariesByIds(
   context: FocusQueryContext,
-  taskId: string | null,
+  taskIds: string[],
 ) {
-  if (!taskId) {
-    return null;
+  if (taskIds.length === 0) {
+    return [];
   }
 
+  const [options, tasksResult] = await Promise.all([
+    getTaskOptions(context),
+    context.supabase
+      .from("tasks")
+      .select(
+        "id,title,status,priority,estimated_minutes,planned_date,project_id",
+      )
+      .eq("user_id", context.userId)
+      .in("id", taskIds),
+  ]);
+
+  if (tasksResult.error) {
+    throw new Error(tasksResult.error.message);
+  }
+
+  const projectsById = new Map(
+    options.projects.map((project) => [project.id, project.name]),
+  );
+  const tasksById = new Map(
+    (tasksResult.data ?? []).map((task) => [
+      task.id,
+      toTaskSummary({
+        ...task,
+        project_name: task.project_id
+          ? (projectsById.get(task.project_id) ?? null)
+          : null,
+      }),
+    ]),
+  );
+
+  return taskIds
+    .map((taskId) => tasksById.get(taskId) ?? null)
+    .filter((task): task is FocusTaskSummary => task !== null);
+}
+
+async function getFocusSessionTaskIds(
+  context: FocusQueryContext,
+  sessionId: string,
+) {
   const { data, error } = await context.supabase
-    .from("tasks")
-    .select("id,title,status,priority,estimated_minutes,planned_date")
+    .from("focus_session_tasks")
+    .select("task_id")
     .eq("user_id", context.userId)
-    .eq("id", taskId)
-    .maybeSingle();
+    .eq("focus_session_id", sessionId)
+    .order("sort_order", { ascending: true })
+    .order("created_at", { ascending: true });
 
   if (error) {
     throw new Error(error.message);
   }
 
-  return toTaskSummary(data ?? null);
+  return (data ?? []).map((link) => link.task_id);
+}
+
+async function getFocusSessionTasks(
+  context: FocusQueryContext,
+  row: FocusSessionRow,
+) {
+  const linkedTaskIds = await getFocusSessionTaskIds(context, row.id);
+  const taskIds = linkedTaskIds.length > 0 ? linkedTaskIds : [];
+
+  if (taskIds.length === 0 && row.task_id) {
+    taskIds.push(row.task_id);
+  }
+
+  return getTaskSummariesByIds(context, taskIds);
 }
 
 export async function getFocusSessionSnapshot(
   row: FocusSessionRow,
   context: FocusQueryContext,
 ): Promise<FocusSessionSnapshot> {
-  const task = await getTaskSummaryById(context, row.task_id);
+  const tasks = await getFocusSessionTasks(context, row);
+  const task = tasks[0] ?? null;
 
   return {
     activeStartedAt: row.active_started_at,
@@ -108,7 +167,8 @@ export async function getFocusSessionSnapshot(
     startedAt: row.started_at,
     status: toFocusSessionStatus(row.status),
     task,
-    taskId: row.task_id,
+    taskId: row.task_id ?? task?.id ?? null,
+    tasks,
   };
 }
 

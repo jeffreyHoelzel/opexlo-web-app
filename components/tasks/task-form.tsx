@@ -4,7 +4,7 @@ import { useActionState, useEffect, useRef, useState } from "react";
 import { Save } from "lucide-react";
 import { useRouter } from "next/navigation";
 
-import { FieldHelpTooltip } from "@/components/tasks/field-help-tooltip";
+import { FieldHelpTooltip } from "@/components/ui/field-help-tooltip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -37,13 +37,7 @@ type TaskFormProps = {
 const fieldClassName =
   "h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50";
 
-function SubmitButton({
-  label,
-  pending,
-}: {
-  label: string;
-  pending: boolean;
-}) {
+function SubmitButton({ label, pending }: { label: string; pending: boolean }) {
   return (
     <Button disabled={pending} type="submit">
       <Save />

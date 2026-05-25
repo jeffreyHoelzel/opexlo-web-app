@@ -7,14 +7,12 @@ export const FOCUS_SESSION_STATUSES = [
   "cancelled",
 ] as const;
 
-export const FOCUS_SESSION_TYPES = [
-  "pomodoro",
-  "deep_work",
-] as const;
+export const FOCUS_SESSION_TYPES = ["pomodoro", "deep_work"] as const;
 
 export type FocusSessionStatus = (typeof FOCUS_SESSION_STATUSES)[number];
 export type FocusSessionType = (typeof FOCUS_SESSION_TYPES)[number];
 export type FocusSessionRow = Tables<"focus_sessions">;
+export type FocusSessionTaskRow = Tables<"focus_session_tasks">;
 export type FocusSessionUpdate = TablesUpdate<"focus_sessions">;
 
 export type FocusTaskSummary = {
@@ -40,6 +38,7 @@ export type FocusSessionSnapshot = {
   status: FocusSessionStatus;
   task: FocusTaskSummary | null;
   taskId: string | null;
+  tasks: FocusTaskSummary[];
 };
 
 export type FocusBootstrapData = {
@@ -54,6 +53,7 @@ export type StartFocusSessionInput = {
   plannedSeconds?: number | null;
   sessionType?: FocusSessionType;
   taskId?: string | null;
+  taskIds?: string[];
 };
 
 export type FocusActionResult =

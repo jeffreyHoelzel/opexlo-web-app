@@ -25,7 +25,9 @@ import {
   type ReactNode,
 } from "react";
 
+import { ActionTooltip } from "@/components/ui/action-tooltip";
 import { Button } from "@/components/ui/button";
+import { useBodyScrollLock } from "@/components/ui/use-body-scroll-lock";
 import {
   cancelFocusSessionAction,
   completeFocusSessionAction,
@@ -47,6 +49,7 @@ import type {
   FocusTaskSummary,
   StartFocusSessionInput,
 } from "@/lib/focus/types";
+import { toggleTaskCompletionAction } from "@/lib/tasks/actions";
 
 type BreakSessionState = {
   activeStartedAt: string | null;
@@ -176,6 +179,14 @@ function getUnixTime(value: string | null) {
 }
 
 function getSessionTitle(session: FocusSessionSnapshot) {
+  if (session.tasks.length === 1) {
+    return session.tasks[0].title;
+  }
+
+  if (session.tasks.length > 1) {
+    return `${session.tasks[0].title} + ${session.tasks.length - 1} more`;
+  }
+
   return session.task?.title ?? "Focus session";
 }
 
@@ -359,6 +370,7 @@ function syncMiniWindow({
         gap: 8px;
       }
       button {
+        position: relative;
         min-height: 36px;
         border: 1px solid rgba(255, 255, 255, 0.18);
         border-radius: 8px;
@@ -367,6 +379,31 @@ function syncMiniWindow({
         font: inherit;
         font-size: 13px;
         font-weight: 700;
+      }
+      button::after {
+        position: absolute;
+        bottom: calc(100% + 8px);
+        left: 50%;
+        width: max-content;
+        max-width: 180px;
+        transform: translateX(-50%);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 6px;
+        background: #111827;
+        color: #f7f7f5;
+        content: attr(data-tooltip);
+        font-size: 11px;
+        font-weight: 600;
+        line-height: 1.3;
+        opacity: 0;
+        padding: 5px 7px;
+        pointer-events: none;
+        transition: opacity 140ms ease;
+        white-space: normal;
+      }
+      button:hover::after,
+      button:focus-visible::after {
+        opacity: 1;
       }
       button.primary {
         border-color: #c4d7df;
@@ -446,18 +483,35 @@ function syncMiniWindow({
   }
 
   if (pauseResume) {
+    const pauseResumeLabel =
+      activeTimer.status === "active" ? "Pause timer" : "Resume timer";
     pauseResume.textContent =
       activeTimer.status === "active" ? "Pause" : "Resume";
+    pauseResume.setAttribute("aria-label", pauseResumeLabel);
+    pauseResume.dataset.tooltip = pauseResumeLabel;
+    pauseResume.title = pauseResumeLabel;
     pauseResume.onclick = activeTimer.status === "active" ? onPause : onResume;
   }
 
   if (complete) {
+    const completeLabel = activeTimer.isBreak
+      ? "End the break"
+      : "Complete the focus session";
     complete.textContent = activeTimer.isBreak ? "End Break" : "Done";
+    complete.setAttribute("aria-label", completeLabel);
+    complete.dataset.tooltip = completeLabel;
+    complete.title = completeLabel;
     complete.onclick = onComplete;
   }
 
   if (stop) {
+    const stopLabel = activeTimer.isBreak
+      ? "Skip the break"
+      : "Stop the focus session";
     stop.textContent = activeTimer.isBreak ? "Skip" : "Stop";
+    stop.setAttribute("aria-label", stopLabel);
+    stop.dataset.tooltip = stopLabel;
+    stop.title = stopLabel;
     stop.onclick = onCancel;
   }
 }
@@ -478,6 +532,9 @@ export function FocusSessionProvider({
   );
   const [recentTasks, setRecentTasks] = useState(bootstrap.recentTasks);
   const [message, setMessage] = useState<string | null>(null);
+  const [completionReviewTasks, setCompletionReviewTasks] = useState<
+    FocusTaskSummary[]
+  >([]);
   const [miniWindowVersion, setMiniWindowVersion] = useState(0);
   const [isPending, startTransition] = useTransition();
   const autoCompletedSessionIdRef = useRef<string | null>(null);
@@ -574,12 +631,43 @@ export function FocusSessionProvider({
     });
   }, []);
 
+  const completeReviewTask = useCallback(
+    (taskId: string) => {
+      const formData = new FormData();
+      formData.set("task_id", taskId);
+
+      startTransition(async () => {
+        try {
+          await toggleTaskCompletionAction(formData);
+          setCompletionReviewTasks((current) =>
+            current.filter((task) => task.id !== taskId),
+          );
+          refreshFocusData();
+          router.refresh();
+        } catch (error) {
+          setMessage(
+            error instanceof Error
+              ? error.message
+              : "Could not complete the task.",
+          );
+        }
+      });
+    },
+    [refreshFocusData, router],
+  );
+
+  const dismissCompletionReview = useCallback(() => {
+    setCompletionReviewTasks([]);
+  }, []);
+
   const startSession = useCallback(
     (input: StartFocusSessionInput) => {
       if (breakSession) {
         setMessage("End the current break before starting another session.");
         return;
       }
+
+      setCompletionReviewTasks([]);
 
       startTransition(async () => {
         handleFocusResult(await startFocusSessionAction(input));
@@ -654,6 +742,9 @@ export function FocusSessionProvider({
       }
 
       const sessionSnapshot = session;
+      const reviewTasks = sessionSnapshot.tasks.filter(
+        (task) => task.status !== "completed",
+      );
 
       startTransition(async () => {
         const result = await completeFocusSessionAction(sessionSnapshot.id);
@@ -672,6 +763,10 @@ export function FocusSessionProvider({
 
         refreshFocusData();
 
+        if (reviewTasks.length > 0) {
+          setCompletionReviewTasks(reviewTasks);
+        }
+
         if (sessionSnapshot.sessionType === "pomodoro") {
           const breakSeconds =
             sessionSnapshot.breakSeconds ?? bootstrap.defaultBreakSeconds;
@@ -680,7 +775,10 @@ export function FocusSessionProvider({
             elapsedSeconds: 0,
             plannedSeconds: breakSeconds,
             status: "active",
-            taskTitle: sessionSnapshot.task?.title ?? null,
+            taskTitle:
+              sessionSnapshot.tasks.length > 0
+                ? getSessionTitle(sessionSnapshot)
+                : null,
           });
           setMessage("Pomodoro complete. Break started.");
         } else if (source === "auto") {
@@ -904,11 +1002,131 @@ export function FocusSessionProvider({
     <FocusSessionContext.Provider value={value}>
       {children}
       {!isFocusRoute ? <FocusSessionDock /> : null}
+      <FocusCompletionReviewModal
+        isPending={isPending}
+        onCompleteTask={completeReviewTask}
+        onDismiss={dismissCompletionReview}
+        tasks={completionReviewTasks}
+      />
       <FocusSessionMessageOverlay
         message={message}
         onDismiss={dismissMessage}
       />
     </FocusSessionContext.Provider>
+  );
+}
+
+function FocusCompletionReviewModal({
+  isPending,
+  onCompleteTask,
+  onDismiss,
+  tasks,
+}: {
+  isPending: boolean;
+  onCompleteTask: (taskId: string) => void;
+  onDismiss: () => void;
+  tasks: FocusTaskSummary[];
+}) {
+  const isOpen = tasks.length > 0;
+
+  useBodyScrollLock(isOpen);
+
+  if (!isOpen) {
+    return null;
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-foreground/25 p-3 backdrop-blur-sm sm:items-center sm:p-6">
+      <div
+        aria-labelledby="focus-review-title"
+        aria-modal="true"
+        className="w-full max-w-lg rounded-lg border border-border bg-card text-card-foreground shadow-xl"
+        role="dialog"
+      >
+        <div className="flex items-start justify-between gap-4 border-b border-border px-4 py-4 sm:px-5">
+          <div>
+            <p className="text-sm font-medium uppercase tracking-[0.16em] text-primary">
+              Focus review
+            </p>
+            <h2
+              className="mt-1 text-xl font-semibold text-foreground"
+              id="focus-review-title"
+            >
+              Wrap up linked tasks
+            </h2>
+          </div>
+          <ActionTooltip
+            content="Close focus review"
+            tooltipId="focus-review-close-tooltip"
+          >
+            <Button
+              aria-describedby="focus-review-close-tooltip"
+              aria-label="Close focus review"
+              onClick={onDismiss}
+              size="icon"
+              type="button"
+              variant="ghost"
+            >
+              <X />
+            </Button>
+          </ActionTooltip>
+        </div>
+
+        <div className="space-y-3 px-4 py-4 sm:px-5">
+          {tasks.map((task) => {
+            const tooltipId = `focus-review-${task.id}-complete-tooltip`;
+
+            return (
+              <div
+                className="flex flex-col gap-3 rounded-lg border border-border bg-background p-3 sm:flex-row sm:items-center sm:justify-between"
+                key={task.id}
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-foreground">
+                    {task.title}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {task.project_name ?? "Inbox"}
+                  </p>
+                </div>
+                <ActionTooltip
+                  content="Mark this task complete"
+                  tooltipId={tooltipId}
+                >
+                  <Button
+                    aria-describedby={tooltipId}
+                    disabled={isPending}
+                    onClick={() => onCompleteTask(task.id)}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    <CheckCircle2 />
+                    Mark complete
+                  </Button>
+                </ActionTooltip>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="flex justify-end border-t border-border px-4 py-4 sm:px-5">
+          <ActionTooltip
+            content="Leave these tasks unchanged"
+            tooltipId="focus-review-dismiss-tooltip"
+          >
+            <Button
+              aria-describedby="focus-review-dismiss-tooltip"
+              onClick={onDismiss}
+              type="button"
+              variant="secondary"
+            >
+              Review later
+            </Button>
+          </ActionTooltip>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -937,15 +1155,21 @@ function FocusSessionMessageOverlay({
             </span>
             <p className="text-sm text-muted-foreground">{message}</p>
           </div>
-          <Button
-            aria-label="Close focus message"
-            onClick={onDismiss}
-            size="icon"
-            type="button"
-            variant="ghost"
+          <ActionTooltip
+            content="Close focus message"
+            tooltipId="focus-message-close-tooltip"
           >
-            <X />
-          </Button>
+            <Button
+              aria-describedby="focus-message-close-tooltip"
+              aria-label="Close focus message"
+              onClick={onDismiss}
+              size="icon"
+              type="button"
+              variant="ghost"
+            >
+              <X />
+            </Button>
+          </ActionTooltip>
         </div>
       </div>
     </div>
@@ -967,6 +1191,9 @@ function FocusSessionDock() {
   if (!activeTimer) {
     return null;
   }
+
+  const pauseResumeLabel =
+    activeTimer.status === "active" ? "Pause timer" : "Resume timer";
 
   return (
     <aside
@@ -990,15 +1217,21 @@ function FocusSessionDock() {
               {activeTimer.taskTitle}
             </h2>
           </div>
-          <Button
-            aria-label="Open full focus view"
-            onClick={openFocusView}
-            size="icon"
-            type="button"
-            variant="ghost"
+          <ActionTooltip
+            content="Open full focus view"
+            tooltipId="focus-dock-open-full-tooltip"
           >
-            <Maximize2 />
-          </Button>
+            <Button
+              aria-describedby="focus-dock-open-full-tooltip"
+              aria-label="Open full focus view"
+              onClick={openFocusView}
+              size="icon"
+              type="button"
+              variant="ghost"
+            >
+              <Maximize2 />
+            </Button>
+          </ActionTooltip>
         </div>
       </div>
 
@@ -1026,54 +1259,79 @@ function FocusSessionDock() {
         </div>
 
         <div className="grid grid-cols-5 gap-2">
-          <Button
-            aria-label={
-              activeTimer.status === "active" ? "Pause timer" : "Resume timer"
-            }
+          <ActionTooltip
             className="col-span-2"
-            disabled={isPending}
-            onClick={
-              activeTimer.status === "active" ? pauseSession : resumeSession
-            }
-            type="button"
-            variant="secondary"
+            content={pauseResumeLabel}
+            tooltipId="focus-dock-pause-resume-tooltip"
           >
-            {activeTimer.status === "active" ? <Pause /> : <Play />}
-            {activeTimer.status === "active" ? "Pause" : "Resume"}
-          </Button>
-          <Button
-            aria-label={
+            <Button
+              aria-describedby="focus-dock-pause-resume-tooltip"
+              aria-label={pauseResumeLabel}
+              className="w-full"
+              disabled={isPending}
+              onClick={
+                activeTimer.status === "active" ? pauseSession : resumeSession
+              }
+              type="button"
+              variant="secondary"
+            >
+              {activeTimer.status === "active" ? <Pause /> : <Play />}
+              {activeTimer.status === "active" ? "Pause" : "Resume"}
+            </Button>
+          </ActionTooltip>
+          <ActionTooltip
+            content={
               activeTimer.isBreak ? "End break" : "Complete focus session"
             }
-            disabled={isPending}
-            onClick={completeSession}
-            size="icon"
-            type="button"
-            variant="outline"
+            tooltipId="focus-dock-complete-tooltip"
           >
-            <CheckCircle2 />
-          </Button>
-          <Button
-            aria-label="Open mini-window"
-            onClick={openMiniWindow}
-            size="icon"
-            type="button"
-            variant="outline"
+            <Button
+              aria-describedby="focus-dock-complete-tooltip"
+              aria-label={
+                activeTimer.isBreak ? "End break" : "Complete focus session"
+              }
+              disabled={isPending}
+              onClick={completeSession}
+              size="icon"
+              type="button"
+              variant="outline"
+            >
+              <CheckCircle2 />
+            </Button>
+          </ActionTooltip>
+          <ActionTooltip
+            content="Open mini-window"
+            tooltipId="focus-dock-mini-window-tooltip"
           >
-            <PictureInPicture2 />
-          </Button>
-          <Button
-            aria-label={
-              activeTimer.isBreak ? "Skip break" : "Stop focus session"
-            }
-            disabled={isPending}
-            onClick={cancelSession}
-            size="icon"
-            type="button"
-            variant="ghost"
+            <Button
+              aria-describedby="focus-dock-mini-window-tooltip"
+              aria-label="Open mini-window"
+              onClick={openMiniWindow}
+              size="icon"
+              type="button"
+              variant="outline"
+            >
+              <PictureInPicture2 />
+            </Button>
+          </ActionTooltip>
+          <ActionTooltip
+            content={activeTimer.isBreak ? "Skip break" : "Stop focus session"}
+            tooltipId="focus-dock-stop-tooltip"
           >
-            <Square />
-          </Button>
+            <Button
+              aria-describedby="focus-dock-stop-tooltip"
+              aria-label={
+                activeTimer.isBreak ? "Skip break" : "Stop focus session"
+              }
+              disabled={isPending}
+              onClick={cancelSession}
+              size="icon"
+              type="button"
+              variant="ghost"
+            >
+              <Square />
+            </Button>
+          </ActionTooltip>
         </div>
       </div>
     </aside>

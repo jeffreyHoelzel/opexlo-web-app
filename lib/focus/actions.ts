@@ -43,16 +43,23 @@ const startFocusSessionSchema = z.object({
     .optional(),
   sessionType: focusSessionTypeSchema.default("pomodoro"),
   taskId: z.string().uuid().nullable().optional(),
+  taskIds: z.array(z.string().uuid()).max(12).optional(),
 });
 
 const FOCUS_REVALIDATE_PATHS = ["/app/focus", "/app/today", "/app/tasks"];
 
-function revalidateFocusPaths(taskId?: string | null) {
+function revalidateFocusPaths(taskIds?: string | string[] | null) {
   FOCUS_REVALIDATE_PATHS.forEach((path) => revalidatePath(path));
 
-  if (taskId) {
+  const resolvedTaskIds = Array.isArray(taskIds)
+    ? taskIds
+    : taskIds
+      ? [taskIds]
+      : [];
+
+  new Set(resolvedTaskIds).forEach((taskId) => {
     revalidatePath(`/app/tasks/${taskId}`);
-  }
+  });
 }
 
 function getErrorMessage(error: unknown) {
@@ -84,32 +91,44 @@ async function getOwnedOpenSessionOrThrow(
   return data;
 }
 
-async function getTaskIdOrThrow(
+async function getTaskIdsOrThrow(
   context: Awaited<ReturnType<typeof getTaskQueryContext>>,
-  taskId: string | null | undefined,
+  taskIds: string[],
 ) {
-  if (!taskId) {
-    return null;
+  if (taskIds.length === 0) {
+    return [];
   }
 
   const { data, error } = await context.supabase
     .from("tasks")
     .select("id")
     .eq("user_id", context.userId)
-    .eq("id", taskId)
     .is("archived_at", null)
-    .neq("status", "archived")
-    .maybeSingle();
+    .in("status", ["inbox", "planned", "in_progress"])
+    .in("id", taskIds);
 
   if (error) {
     throw new Error(error.message);
   }
 
-  if (!data) {
-    throw new Error("Task not found.");
+  const ownedTaskIds = new Set((data ?? []).map((task) => task.id));
+
+  if (ownedTaskIds.size !== taskIds.length) {
+    throw new Error("One or more tasks could not be focused.");
   }
 
-  return data.id;
+  return taskIds;
+}
+
+function getRequestedTaskIds(values: z.infer<typeof startFocusSessionSchema>) {
+  const rawTaskIds =
+    values.taskIds && values.taskIds.length > 0
+      ? values.taskIds
+      : values.taskId
+        ? [values.taskId]
+        : [];
+
+  return Array.from(new Set(rawTaskIds));
 }
 
 function getDurationMinutes(seconds: number) {
@@ -167,7 +186,11 @@ export async function startFocusSessionAction(
     }
 
     const values = parsed.data;
-    const taskId = await getTaskIdOrThrow(context, values.taskId);
+    const taskIds = await getTaskIdsOrThrow(
+      context,
+      getRequestedTaskIds(values),
+    );
+    const primaryTaskId = taskIds[0] ?? null;
     const now = new Date().toISOString();
     const plannedSeconds = values.plannedSeconds;
     const breakSeconds =
@@ -213,7 +236,7 @@ export async function startFocusSessionAction(
         session_type: values.sessionType,
         started_at: now,
         status: "active",
-        task_id: taskId,
+        task_id: primaryTaskId,
         user_id: context.userId,
       })
       .select("*")
@@ -223,7 +246,30 @@ export async function startFocusSessionAction(
       throw new Error(error.message);
     }
 
-    revalidateFocusPaths(taskId);
+    if (taskIds.length > 0) {
+      const { error: linkError } = await context.supabase
+        .from("focus_session_tasks")
+        .insert(
+          taskIds.map((taskId, index) => ({
+            focus_session_id: data.id,
+            sort_order: index,
+            task_id: taskId,
+            user_id: context.userId,
+          })),
+        );
+
+      if (linkError) {
+        await context.supabase
+          .from("focus_sessions")
+          .delete()
+          .eq("user_id", context.userId)
+          .eq("id", data.id);
+
+        throw new Error(linkError.message);
+      }
+    }
+
+    revalidateFocusPaths(taskIds);
 
     return {
       session: await getFocusSessionSnapshot(data, context),

@@ -12,6 +12,7 @@ type FocusStartButtonProps = Omit<ButtonProps, "onClick"> & {
   plannedSeconds?: number | null;
   sessionType?: FocusSessionType;
   taskId?: string | null;
+  taskIds?: string[];
 };
 
 export function FocusStartButton({
@@ -20,6 +21,7 @@ export function FocusStartButton({
   plannedSeconds,
   sessionType = "pomodoro",
   taskId,
+  taskIds,
   type = "button",
   ...buttonProps
 }: FocusStartButtonProps) {
@@ -37,7 +39,8 @@ export function FocusStartButton({
           breakSeconds: resolvedBreakSeconds,
           plannedSeconds: resolvedPlannedSeconds,
           sessionType,
-          taskId: taskId ?? null,
+          taskId: taskId ?? taskIds?.[0] ?? null,
+          taskIds: taskIds ?? (taskId ? [taskId] : undefined),
         });
       }}
       type={type}

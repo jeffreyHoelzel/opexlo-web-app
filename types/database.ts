@@ -170,6 +170,33 @@ export type Database = {
         };
         Relationships: [];
       };
+      focus_session_tasks: {
+        Row: {
+          created_at: string;
+          focus_session_id: string;
+          id: string;
+          sort_order: number;
+          task_id: string;
+          user_id: string;
+        };
+        Insert: {
+          created_at?: string;
+          focus_session_id: string;
+          id?: string;
+          sort_order?: number;
+          task_id: string;
+          user_id: string;
+        };
+        Update: {
+          created_at?: string;
+          focus_session_id?: string;
+          id?: string;
+          sort_order?: number;
+          task_id?: string;
+          user_id?: string;
+        };
+        Relationships: [];
+      };
       goals: {
         Row: {
           area_id: string | null;
