@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   CalendarClock,
@@ -28,8 +28,6 @@ import {
   upsertTimeBlockAction,
 } from "@/lib/time-blocks/actions";
 import {
-  DEFAULT_VISIBLE_END_MINUTES,
-  DEFAULT_VISIBLE_START_MINUTES,
   minutesToTimeInput,
   parseTimeToMinutes,
   TIME_BLOCK_STEP_MINUTES,
@@ -64,7 +62,12 @@ type TimeBlockingPanelProps = {
 const DEFAULT_FORM_START = "09:00";
 const DEFAULT_FORM_DURATION_MINUTES = 30;
 const LATEST_MODAL_END_MINUTES = 23 * 60 + 45;
-const TIMELINE_MINUTE_HEIGHT = 2;
+const TIMELINE_DAY_START_MINUTES = 0;
+const TIMELINE_DAY_END_MINUTES = 24 * 60;
+const TIMELINE_MINUTE_HEIGHT = 1;
+const TIMELINE_TOP_PADDING = 16;
+const TIMELINE_BOTTOM_PADDING = 24;
+const TIMELINE_VIEWPORT_HEIGHT = "min(70vh, 38rem)";
 
 function formatHour(minutes: number) {
   const hour = Math.floor(minutes / 60);
@@ -109,28 +112,17 @@ function taskMeta(task: TimeBlockTaskOption | TaskListItem | null) {
     .join(" | ");
 }
 
-function getVisibleRange(blocks: TimeBlockItem[]) {
-  const firstBlockStart = Math.min(
-    ...blocks.map((block) => block.start_minutes),
-    DEFAULT_VISIBLE_START_MINUTES,
-  );
-  const lastBlockEnd = Math.max(
-    ...blocks.map((block) => block.end_minutes),
-    DEFAULT_VISIBLE_END_MINUTES,
-  );
-  const start = Math.max(0, Math.floor(firstBlockStart / 60) * 60);
-  const end = Math.min(24 * 60, Math.ceil(lastBlockEnd / 60) * 60);
-
+function getVisibleRange() {
   return {
-    end: Math.max(end, start + 60),
-    start,
+    end: TIMELINE_DAY_END_MINUTES,
+    start: TIMELINE_DAY_START_MINUTES,
   };
 }
 
 function getTimelineHours(start: number, end: number) {
   const hours: number[] = [];
 
-  for (let minutes = start; minutes <= end; minutes += 60) {
+  for (let minutes = start; minutes < end; minutes += 60) {
     hours.push(minutes);
   }
 
@@ -211,6 +203,7 @@ export function TimeBlockingPanel({
   unblockedTasks = [],
 }: TimeBlockingPanelProps) {
   const router = useRouter();
+  const calendarScrollRef = useRef<HTMLDivElement | null>(null);
   const [formState, setFormState] = useState<TimeBlockFormState>(() =>
     getInitialForm(date, lockedTaskId),
   );
@@ -226,15 +219,44 @@ export function TimeBlockingPanel({
   const lockedTask = lockedTaskId
     ? (taskOptions.find((task) => task.id === lockedTaskId) ?? null)
     : null;
-  const visibleRange = getVisibleRange(blocks);
+  const visibleRange = getVisibleRange();
+  const firstBlockStartMinutes = useMemo(
+    () =>
+      blocks.length > 0
+        ? Math.min(...blocks.map((block) => block.start_minutes))
+        : null,
+    [blocks],
+  );
   const timelineHours = getTimelineHours(visibleRange.start, visibleRange.end);
   const timelineHeight =
     (visibleRange.end - visibleRange.start) * TIMELINE_MINUTE_HEIGHT;
+  const timelineContentHeight =
+    timelineHeight + TIMELINE_TOP_PADDING + TIMELINE_BOTTOM_PADDING;
   const modalTitle = formState.blockId
     ? "Edit time block"
     : "Create time block";
 
   useBodyScrollLock(isModalOpen);
+
+  useEffect(() => {
+    const scrollContainer = calendarScrollRef.current;
+
+    if (!scrollContainer) {
+      return;
+    }
+
+    if (firstBlockStartMinutes === null) {
+      scrollContainer.scrollTop = 0;
+      return;
+    }
+
+    scrollContainer.scrollTop = Math.max(
+      0,
+      TIMELINE_TOP_PADDING +
+        (firstBlockStartMinutes - visibleRange.start) * TIMELINE_MINUTE_HEIGHT -
+        48,
+    );
+  }, [date, firstBlockStartMinutes, visibleRange.start]);
 
   useEffect(() => {
     if (!isModalOpen) {
@@ -357,9 +379,9 @@ export function TimeBlockingPanel({
         <CardContent className="space-y-5">
           <section
             aria-label="Time block timeline"
-            className="rounded-lg border border-border bg-background p-4"
+            className="overflow-hidden rounded-lg border border-border bg-background"
           >
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col gap-2 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h3 className="text-sm font-semibold text-foreground">
                   {date}
@@ -375,96 +397,135 @@ export function TimeBlockingPanel({
             </div>
 
             <div
-              className="relative mt-4 min-h-[48rem]"
-              style={{ height: `${Math.max(768, timelineHeight)}px` }}
+              className="overflow-y-auto overflow-x-hidden"
+              data-time-block-calendar-scroll=""
+              ref={calendarScrollRef}
+              style={{ height: TIMELINE_VIEWPORT_HEIGHT }}
             >
-              {timelineHours.map((minutes) => (
-                <div
-                  className="absolute left-0 right-0 grid grid-cols-[3.75rem_1fr] items-center gap-3 sm:grid-cols-[4.5rem_1fr]"
-                  key={minutes}
+              <div
+                className="relative min-h-full"
+                style={{ height: `${Math.max(768, timelineContentHeight)}px` }}
+              >
+                {timelineHours.map((minutes) => (
+                  <div
+                    className="absolute left-0 right-0 grid grid-cols-[3.25rem_1fr] items-start gap-2 sm:grid-cols-[4rem_1fr]"
+                    key={minutes}
+                    style={{
+                      top: `${
+                        TIMELINE_TOP_PADDING +
+                        (minutes - visibleRange.start) * TIMELINE_MINUTE_HEIGHT
+                      }px`,
+                    }}
+                  >
+                    <span className="-mt-2 text-right text-[11px] leading-4 text-muted-foreground">
+                      {formatHour(minutes)}
+                    </span>
+                    <span className="h-px origin-left scale-y-50 bg-border/70" />
+                  </div>
+                ))}
+
+                <button
+                  aria-label="Create a time block from the calendar"
+                  className="absolute left-[3.25rem] right-0 border-l border-border/70 bg-card/45 text-left transition-colors hover:bg-card/70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring sm:left-[4rem]"
+                  onClick={(event) => {
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    openCreateModal(
+                      getClickedStartMinute({
+                        clientY: event.clientY,
+                        timelineTop: rect.top,
+                        visibleStart: visibleRange.start,
+                      }),
+                    );
+                  }}
                   style={{
-                    top: `${(minutes - visibleRange.start) * TIMELINE_MINUTE_HEIGHT}px`,
+                    bottom: `${TIMELINE_BOTTOM_PADDING}px`,
+                    top: `${TIMELINE_TOP_PADDING}px`,
+                  }}
+                  type="button"
+                >
+                  {blocks.length === 0 ? (
+                    <span className="absolute left-4 top-6 text-sm text-muted-foreground">
+                      Click the calendar to create your first time block.
+                    </span>
+                  ) : null}
+                </button>
+
+                <div
+                  className="pointer-events-none absolute left-[3.25rem] right-0 sm:left-[4rem]"
+                  style={{
+                    bottom: `${TIMELINE_BOTTOM_PADDING}px`,
+                    top: `${TIMELINE_TOP_PADDING}px`,
                   }}
                 >
-                  <span className="text-xs text-muted-foreground">
-                    {formatHour(minutes)}
-                  </span>
-                  <span className="h-px bg-border" />
+                  {blocks.map((block) => {
+                    const top =
+                      (block.start_minutes - visibleRange.start) *
+                      TIMELINE_MINUTE_HEIGHT;
+                    const height = Math.max(
+                      28,
+                      (block.end_minutes - block.start_minutes) *
+                        TIMELINE_MINUTE_HEIGHT,
+                    );
+                    const isCompactBlock = height < 44;
+                    const showTaskMeta = height >= 64;
+                    const showActualTime = height >= 84;
+
+                    return (
+                      <button
+                        aria-label={`Edit ${block.title}`}
+                        className={cn(
+                          "pointer-events-auto absolute left-1 right-2 overflow-hidden rounded-md border border-border bg-secondary/90 px-2.5 py-1 text-left shadow-sm transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                          formState.blockId === block.id &&
+                            isModalOpen &&
+                            "border-primary/60 bg-secondary",
+                        )}
+                        key={block.id}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openEditModal(block);
+                        }}
+                        style={{
+                          height: `${height}px`,
+                          top: `${top}px`,
+                        }}
+                        type="button"
+                      >
+                        {isCompactBlock ? (
+                          <span className="flex h-full min-w-0 items-center gap-2">
+                            <span className="min-w-0 flex-1 truncate text-xs font-semibold leading-5 text-foreground">
+                              {block.title}
+                            </span>
+                            <span className="shrink-0 text-[11px] leading-5 text-muted-foreground">
+                              {block.start_time}-{block.end_time}
+                            </span>
+                          </span>
+                        ) : (
+                          <>
+                            <span className="block truncate text-sm font-semibold leading-5 text-foreground">
+                              {block.title}
+                            </span>
+                            <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                              {block.start_time}-{block.end_time} |{" "}
+                              {formatMinutes(block.duration_minutes)}
+                            </span>
+                            {showTaskMeta ? (
+                              <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                                {taskMeta(block.task)}
+                              </span>
+                            ) : null}
+                            {showActualTime && block.task ? (
+                              <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                                Actual {formatMinutes(block.actual_minutes)} /
+                                est{" "}
+                                {formatMinutes(block.task.estimated_minutes)}
+                              </span>
+                            ) : null}
+                          </>
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
-              ))}
-
-              <button
-                aria-label="Create a time block from the calendar"
-                className="absolute bottom-0 left-[3.75rem] right-0 top-0 rounded-lg border border-border/80 bg-card/75 text-left transition-colors hover:bg-card focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring sm:left-[4.5rem]"
-                onClick={(event) => {
-                  const rect = event.currentTarget.getBoundingClientRect();
-                  openCreateModal(
-                    getClickedStartMinute({
-                      clientY: event.clientY,
-                      timelineTop: rect.top,
-                      visibleStart: visibleRange.start,
-                    }),
-                  );
-                }}
-                type="button"
-              >
-                {blocks.length === 0 ? (
-                  <span className="flex h-full min-h-60 items-center justify-center px-4 text-center text-sm text-muted-foreground">
-                    Click the calendar to create your first time block.
-                  </span>
-                ) : null}
-              </button>
-
-              <div className="pointer-events-none absolute bottom-0 left-[3.75rem] right-0 top-0 sm:left-[4.5rem]">
-                {blocks.map((block) => {
-                  const top =
-                    (block.start_minutes - visibleRange.start) *
-                    TIMELINE_MINUTE_HEIGHT;
-                  const height = Math.max(
-                    60,
-                    (block.end_minutes - block.start_minutes) *
-                      TIMELINE_MINUTE_HEIGHT,
-                  );
-
-                  return (
-                    <button
-                      aria-label={`Edit ${block.title}`}
-                      className={cn(
-                        "pointer-events-auto absolute left-2 right-2 overflow-hidden rounded-md border border-primary/25 bg-primary/10 px-3 py-2 text-left shadow-sm transition-colors hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-                        formState.blockId === block.id &&
-                          isModalOpen &&
-                          "border-primary bg-primary/15",
-                      )}
-                      key={block.id}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        openEditModal(block);
-                      }}
-                      style={{
-                        height: `${height}px`,
-                        top: `${top}px`,
-                      }}
-                      type="button"
-                    >
-                      <span className="block truncate text-sm font-semibold text-foreground">
-                        {block.title}
-                      </span>
-                      <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-                        {block.start_time}-{block.end_time} |{" "}
-                        {formatMinutes(block.duration_minutes)}
-                      </span>
-                      <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-                        {taskMeta(block.task)}
-                      </span>
-                      {block.task ? (
-                        <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-                          Actual {formatMinutes(block.actual_minutes)} / est{" "}
-                          {formatMinutes(block.task.estimated_minutes)}
-                        </span>
-                      ) : null}
-                    </button>
-                  );
-                })}
               </div>
             </div>
           </section>
@@ -496,7 +557,7 @@ export function TimeBlockingPanel({
                         onClick={() =>
                           openCreateModal(
                             parseTimeToMinutes(DEFAULT_FORM_START) ??
-                              DEFAULT_VISIBLE_START_MINUTES,
+                              TIMELINE_DAY_START_MINUTES,
                             task,
                           )
                         }
