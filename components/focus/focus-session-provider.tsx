@@ -29,23 +29,14 @@ import { ActionTooltip } from "@/components/ui/action-tooltip";
 import { Button } from "@/components/ui/button";
 import { useBodyScrollLock } from "@/components/ui/use-body-scroll-lock";
 import {
-  cancelFocusSessionAction,
   completeFocusSessionAction,
   loadFocusBootstrapAction,
-  pauseFocusSessionAction,
-  resumeFocusSessionAction,
-  startFocusSessionAction,
 } from "@/lib/focus/actions";
-import {
-  formatFocusClock,
-  getFocusSessionElapsedSeconds,
-  getFocusSessionProgressPercent,
-  getFocusSessionRemainingSeconds,
-} from "@/lib/focus/time";
+import { formatFocusClock } from "@/lib/focus/time";
 import type {
   FocusActionResult,
   FocusBootstrapData,
-  FocusSessionSnapshot,
+  FocusSessionDraft,
   FocusTaskSummary,
   StartFocusSessionInput,
 } from "@/lib/focus/types";
@@ -85,7 +76,7 @@ type FocusSessionContextValue = {
   recentTasks: FocusTaskSummary[];
   refreshFocusData: () => void;
   resumeSession: () => void;
-  session: FocusSessionSnapshot | null;
+  session: FocusSessionDraft | null;
   startSession: (input: StartFocusSessionInput) => void;
 };
 
@@ -168,6 +159,9 @@ function createFocusTickStore() {
 }
 
 const focusTickStore = createFocusTickStore();
+const FOCUS_COOKIE_VERSION = 1;
+const FOCUS_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
+const FOCUS_CHANNEL_NAME = "opexlo-focus-session";
 
 function getUnixTime(value: string | null) {
   if (!value) {
@@ -178,7 +172,171 @@ function getUnixTime(value: string | null) {
   return Number.isFinite(timestamp) ? timestamp : null;
 }
 
-function getSessionTitle(session: FocusSessionSnapshot) {
+function getFocusCookieName(userId: string) {
+  return `opexlo_focus_session_${userId}`;
+}
+
+function readCookieValue(name: string) {
+  const prefix = `${name}=`;
+  const cookie = document.cookie
+    .split("; ")
+    .find((part) => part.startsWith(prefix));
+
+  if (!cookie) {
+    return null;
+  }
+
+  return cookie.slice(prefix.length);
+}
+
+function writeFocusCookie(name: string, session: FocusSessionDraft) {
+  const value = encodeURIComponent(
+    JSON.stringify({
+      ...session,
+      version: FOCUS_COOKIE_VERSION,
+    }),
+  );
+
+  document.cookie = `${name}=${value}; Max-Age=${FOCUS_COOKIE_MAX_AGE_SECONDS}; Path=/app; SameSite=Lax`;
+}
+
+function clearFocusCookie(name: string) {
+  document.cookie = `${name}=; Max-Age=0; Path=/app; SameSite=Lax`;
+}
+
+function toStringOrNull(value: unknown) {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function toPositiveIntegerOrNull(value: unknown) {
+  return typeof value === "number" && Number.isInteger(value) && value > 0
+    ? value
+    : null;
+}
+
+function toNonnegativeInteger(value: unknown) {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0
+    ? value
+    : 0;
+}
+
+function sanitizeTaskSummary(value: unknown): FocusTaskSummary | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const task = value as Partial<FocusTaskSummary>;
+
+  if (typeof task.id !== "string" || typeof task.title !== "string") {
+    return null;
+  }
+
+  return {
+    estimated_minutes:
+      typeof task.estimated_minutes === "number"
+        ? task.estimated_minutes
+        : null,
+    id: task.id,
+    planned_date: toStringOrNull(task.planned_date),
+    priority: typeof task.priority === "string" ? task.priority : "medium",
+    project_name: toStringOrNull(task.project_name),
+    status: typeof task.status === "string" ? task.status : "inbox",
+    title: task.title.slice(0, 180),
+  };
+}
+
+function parseFocusCookie(value: string | null): FocusSessionDraft | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(decodeURIComponent(value)) as Record<
+      string,
+      unknown
+    >;
+
+    if (parsed.version !== FOCUS_COOKIE_VERSION) {
+      return null;
+    }
+
+    const plannedSeconds = toPositiveIntegerOrNull(parsed.plannedSeconds);
+    const startedAt = toStringOrNull(parsed.startedAt);
+    const rawTaskIds = Array.isArray(parsed.taskIds) ? parsed.taskIds : [];
+    const taskIds = rawTaskIds.filter(
+      (taskId): taskId is string => typeof taskId === "string",
+    );
+    const rawTasks = Array.isArray(parsed.tasks) ? parsed.tasks : [];
+    const tasks = rawTasks
+      .map(sanitizeTaskSummary)
+      .filter((task): task is FocusTaskSummary => task !== null);
+
+    if (
+      !plannedSeconds ||
+      !startedAt ||
+      (parsed.sessionType !== "pomodoro" && parsed.sessionType !== "deep_work")
+    ) {
+      return null;
+    }
+
+    return {
+      activeStartedAt: toStringOrNull(parsed.activeStartedAt),
+      breakSeconds: toPositiveIntegerOrNull(parsed.breakSeconds),
+      elapsedSeconds: toNonnegativeInteger(parsed.elapsedSeconds),
+      plannedSeconds,
+      sessionType: parsed.sessionType,
+      startedAt,
+      status: parsed.status === "paused" ? "paused" : "active",
+      taskId: toStringOrNull(parsed.taskId),
+      taskIds,
+      tasks,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function getDraftElapsedSeconds(
+  session: FocusSessionDraft,
+  nowMs = Date.now(),
+) {
+  const baseSeconds = Math.max(0, session.elapsedSeconds);
+
+  if (session.status !== "active") {
+    return baseSeconds;
+  }
+
+  const activeStartedAtMs = getUnixTime(session.activeStartedAt);
+
+  if (!activeStartedAtMs) {
+    return baseSeconds;
+  }
+
+  const activeSeconds = Math.floor(
+    Math.max(0, nowMs - activeStartedAtMs) / 1000,
+  );
+
+  return baseSeconds + activeSeconds;
+}
+
+function getDraftRemainingSeconds(
+  session: FocusSessionDraft,
+  elapsedSeconds: number,
+) {
+  return Math.max(0, session.plannedSeconds - elapsedSeconds);
+}
+
+function getDraftProgressPercent(
+  session: FocusSessionDraft,
+  elapsedSeconds: number,
+) {
+  return Math.min(
+    100,
+    Math.round((elapsedSeconds / session.plannedSeconds) * 100),
+  );
+}
+
+function getSessionTitle(session: FocusSessionDraft) {
   if (session.tasks.length === 1) {
     return session.tasks[0].title;
   }
@@ -187,10 +345,10 @@ function getSessionTitle(session: FocusSessionSnapshot) {
     return `${session.tasks[0].title} + ${session.tasks.length - 1} more`;
   }
 
-  return session.task?.title ?? "Focus session";
+  return "Focus session";
 }
 
-function getSessionModeLabel(session: FocusSessionSnapshot) {
+function getSessionModeLabel(session: FocusSessionDraft) {
   if (session.sessionType === "pomodoro") {
     return "Pomodoro";
   }
@@ -249,22 +407,18 @@ function getActiveTimerSnapshot({
 }: {
   breakSession: BreakSessionState | null;
   nowMs: number;
-  session: FocusSessionSnapshot | null;
+  session: FocusSessionDraft | null;
 }): ActiveTimerSnapshot | null {
   if (session) {
-    const elapsedSeconds = getFocusSessionElapsedSeconds(session, nowMs);
-    const status = session.status === "active" ? "active" : "paused";
+    const elapsedSeconds = getDraftElapsedSeconds(session, nowMs);
 
     return {
       elapsedSeconds,
       isBreak: false,
       modeLabel: getSessionModeLabel(session),
-      progressPercent: getFocusSessionProgressPercent(session, elapsedSeconds),
-      remainingSeconds: getFocusSessionRemainingSeconds(
-        session,
-        elapsedSeconds,
-      ),
-      status,
+      progressPercent: getDraftProgressPercent(session, elapsedSeconds),
+      remainingSeconds: getDraftRemainingSeconds(session, elapsedSeconds),
+      status: session.status,
       taskTitle: getSessionTitle(session),
     };
   }
@@ -526,7 +680,11 @@ export function FocusSessionProvider({
   const pathname = usePathname();
   const router = useRouter();
   const isFocusRoute = pathname === "/app/focus";
-  const [session, setSession] = useState(bootstrap.activeSession);
+  const focusCookieName = useMemo(
+    () => getFocusCookieName(bootstrap.userId),
+    [bootstrap.userId],
+  );
+  const [session, setSession] = useState<FocusSessionDraft | null>(null);
   const [breakSession, setBreakSession] = useState<BreakSessionState | null>(
     null,
   );
@@ -538,6 +696,7 @@ export function FocusSessionProvider({
   const [miniWindowVersion, setMiniWindowVersion] = useState(0);
   const [isPending, startTransition] = useTransition();
   const autoCompletedSessionIdRef = useRef<string | null>(null);
+  const focusChannelRef = useRef<BroadcastChannel | null>(null);
   const miniWindowRef = useRef<Window | null>(null);
   const now = useSyncExternalStore(
     focusTickStore.subscribe,
@@ -568,10 +727,70 @@ export function FocusSessionProvider({
     closeMiniWindow();
     router.push("/app/focus");
   }, [closeMiniWindow, router]);
+  const syncSessionFromCookie = useCallback(() => {
+    setSession(parseFocusCookie(readCookieValue(focusCookieName)));
+  }, [focusCookieName]);
+  const broadcastFocusSessionChange = useCallback(() => {
+    focusChannelRef.current?.postMessage({
+      cookieName: focusCookieName,
+      type: "focus-session-changed",
+    });
+  }, [focusCookieName]);
+  const persistSession = useCallback(
+    (nextSession: FocusSessionDraft) => {
+      writeFocusCookie(focusCookieName, nextSession);
+      setSession(nextSession);
+      broadcastFocusSessionChange();
+    },
+    [broadcastFocusSessionChange, focusCookieName],
+  );
+  const clearPersistedSession = useCallback(() => {
+    clearFocusCookie(focusCookieName);
+    setSession(null);
+    broadcastFocusSessionChange();
+  }, [broadcastFocusSessionChange, focusCookieName]);
 
   useEffect(() => {
     focusTickStore.setEnabled(activeTimer?.status === "active");
   }, [activeTimer?.status]);
+
+  useEffect(() => {
+    syncSessionFromCookie();
+
+    if (typeof BroadcastChannel !== "undefined") {
+      const channel = new BroadcastChannel(FOCUS_CHANNEL_NAME);
+      focusChannelRef.current = channel;
+
+      channel.onmessage = (event) => {
+        if (
+          event.data?.type === "focus-session-changed" &&
+          event.data?.cookieName === focusCookieName
+        ) {
+          syncSessionFromCookie();
+        }
+      };
+    }
+
+    function handleFocusChange() {
+      syncSessionFromCookie();
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible") {
+        syncSessionFromCookie();
+      }
+    }
+
+    window.addEventListener("focus", handleFocusChange);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener("focus", handleFocusChange);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      focusChannelRef.current?.close();
+      focusChannelRef.current = null;
+    };
+  }, [focusCookieName, syncSessionFromCookie]);
 
   useEffect(() => {
     if (!message) {
@@ -606,8 +825,6 @@ export function FocusSessionProvider({
       return;
     }
 
-    setSession(result.session);
-
     if (result.message) {
       setMessage(result.message);
     }
@@ -617,19 +834,15 @@ export function FocusSessionProvider({
     startTransition(async () => {
       try {
         const nextBootstrap = await loadFocusBootstrapAction();
-        setSession(nextBootstrap.activeSession);
         setRecentTasks(nextBootstrap.recentTasks);
-
-        if (nextBootstrap.activeSession) {
-          setBreakSession(null);
-        }
+        syncSessionFromCookie();
       } catch (error) {
         setMessage(
           error instanceof Error ? error.message : "Could not refresh focus.",
         );
       }
     });
-  }, []);
+  }, [syncSessionFromCookie]);
 
   const completeReviewTask = useCallback(
     (taskId: string) => {
@@ -667,13 +880,71 @@ export function FocusSessionProvider({
         return;
       }
 
-      setCompletionReviewTasks([]);
+      if (session) {
+        setMessage("A focus session is already running.");
+        return;
+      }
 
-      startTransition(async () => {
-        handleFocusResult(await startFocusSessionAction(input));
+      const plannedSeconds =
+        input.plannedSeconds ?? bootstrap.defaultFocusSeconds;
+
+      if (!plannedSeconds || plannedSeconds <= 0) {
+        setMessage("Choose a focus duration.");
+        return;
+      }
+
+      const taskIds = Array.from(
+        new Set(
+          input.taskIds && input.taskIds.length > 0
+            ? input.taskIds
+            : input.taskId
+              ? [input.taskId]
+              : [],
+        ),
+      );
+      const recentTasksById = new Map(
+        recentTasks.map((task) => [task.id, task]),
+      );
+      const tasks = taskIds.map(
+        (taskId) =>
+          recentTasksById.get(taskId) ?? {
+            estimated_minutes: null,
+            id: taskId,
+            planned_date: null,
+            priority: "medium",
+            project_name: null,
+            status: "inbox",
+            title: "Linked task",
+          },
+      );
+      const now = new Date().toISOString();
+
+      setCompletionReviewTasks([]);
+      setBreakSession(null);
+      persistSession({
+        activeStartedAt: now,
+        breakSeconds:
+          input.sessionType === "pomodoro"
+            ? (input.breakSeconds ?? bootstrap.defaultBreakSeconds)
+            : null,
+        elapsedSeconds: 0,
+        plannedSeconds,
+        sessionType: input.sessionType ?? "pomodoro",
+        startedAt: now,
+        status: "active",
+        taskId: taskIds[0] ?? null,
+        taskIds,
+        tasks,
       });
     },
-    [breakSession, handleFocusResult],
+    [
+      bootstrap.defaultBreakSeconds,
+      bootstrap.defaultFocusSeconds,
+      breakSession,
+      persistSession,
+      recentTasks,
+      session,
+    ],
   );
 
   const pauseSession = useCallback(() => {
@@ -699,10 +970,15 @@ export function FocusSessionProvider({
       return;
     }
 
-    startTransition(async () => {
-      handleFocusResult(await pauseFocusSessionAction(session.id));
+    const elapsedSeconds = getDraftElapsedSeconds(session);
+
+    persistSession({
+      ...session,
+      activeStartedAt: null,
+      elapsedSeconds,
+      status: "paused",
     });
-  }, [breakSession, handleFocusResult, session]);
+  }, [breakSession, persistSession, session]);
 
   const resumeSession = useCallback(() => {
     if (breakSession) {
@@ -724,10 +1000,12 @@ export function FocusSessionProvider({
       return;
     }
 
-    startTransition(async () => {
-      handleFocusResult(await resumeFocusSessionAction(session.id));
+    persistSession({
+      ...session,
+      activeStartedAt: new Date().toISOString(),
+      status: "active",
     });
-  }, [breakSession, handleFocusResult, session]);
+  }, [breakSession, persistSession, session]);
 
   const completeSession = useCallback(
     (source: CompleteSessionSource = "manual") => {
@@ -742,18 +1020,28 @@ export function FocusSessionProvider({
       }
 
       const sessionSnapshot = session;
+      const elapsedSeconds = getDraftElapsedSeconds(sessionSnapshot);
+      const endedAt = new Date().toISOString();
       const reviewTasks = sessionSnapshot.tasks.filter(
         (task) => task.status !== "completed",
       );
 
       startTransition(async () => {
-        const result = await completeFocusSessionAction(sessionSnapshot.id);
+        const result = await completeFocusSessionAction({
+          breakSeconds: sessionSnapshot.breakSeconds,
+          elapsedSeconds,
+          endedAt,
+          plannedSeconds: sessionSnapshot.plannedSeconds,
+          sessionType: sessionSnapshot.sessionType,
+          startedAt: sessionSnapshot.startedAt,
+          taskIds: sessionSnapshot.taskIds,
+        });
         handleFocusResult(result);
 
         if (result.status === "error") {
           if (
             source === "auto" &&
-            autoCompletedSessionIdRef.current === sessionSnapshot.id
+            autoCompletedSessionIdRef.current === sessionSnapshot.startedAt
           ) {
             autoCompletedSessionIdRef.current = null;
           }
@@ -761,6 +1049,7 @@ export function FocusSessionProvider({
           return;
         }
 
+        clearPersistedSession();
         refreshFocusData();
 
         if (reviewTasks.length > 0) {
@@ -785,7 +1074,7 @@ export function FocusSessionProvider({
           setMessage("Session complete.");
         }
 
-        if (autoCompletedSessionIdRef.current === sessionSnapshot.id) {
+        if (autoCompletedSessionIdRef.current === sessionSnapshot.startedAt) {
           autoCompletedSessionIdRef.current = null;
         }
       });
@@ -793,6 +1082,7 @@ export function FocusSessionProvider({
     [
       bootstrap.defaultBreakSeconds,
       breakSession,
+      clearPersistedSession,
       handleFocusResult,
       refreshFocusData,
       session,
@@ -810,17 +1100,9 @@ export function FocusSessionProvider({
       return;
     }
 
-    startTransition(async () => {
-      const result = await cancelFocusSessionAction(session.id);
-      handleFocusResult(result);
-
-      if (result.status === "error") {
-        return;
-      }
-
-      refreshFocusData();
-    });
-  }, [breakSession, handleFocusResult, refreshFocusData, session]);
+    clearPersistedSession();
+    setMessage("Focus session stopped.");
+  }, [breakSession, clearPersistedSession, session]);
 
   const openFallbackPopup = useCallback(() => {
     const popupWindow = window.open(
@@ -840,11 +1122,6 @@ export function FocusSessionProvider({
 
   const openMiniWindow = useCallback(() => {
     if (!activeTimer) {
-      return;
-    }
-
-    if (isFocusRoute) {
-      closeMiniWindow();
       return;
     }
 
@@ -874,7 +1151,7 @@ export function FocusSessionProvider({
     }
 
     openFallbackPopup();
-  }, [activeTimer, closeMiniWindow, isFocusRoute, openFallbackPopup]);
+  }, [activeTimer, openFallbackPopup]);
 
   useEffect(() => {
     if (!isFocusRoute) {
@@ -953,11 +1230,11 @@ export function FocusSessionProvider({
       return;
     }
 
-    if (autoCompletedSessionIdRef.current === session.id) {
+    if (autoCompletedSessionIdRef.current === session.startedAt) {
       return;
     }
 
-    autoCompletedSessionIdRef.current = session.id;
+    autoCompletedSessionIdRef.current = session.startedAt;
     completeSession("auto");
   }, [activeTimer, completeSession, session]);
 
@@ -1055,21 +1332,16 @@ function FocusCompletionReviewModal({
               Wrap up linked tasks
             </h2>
           </div>
-          <ActionTooltip
-            content="Close focus review"
-            tooltipId="focus-review-close-tooltip"
+          <Button
+            aria-describedby="focus-review-close-tooltip"
+            aria-label="Close focus review"
+            onClick={onDismiss}
+            size="icon"
+            type="button"
+            variant="ghost"
           >
-            <Button
-              aria-describedby="focus-review-close-tooltip"
-              aria-label="Close focus review"
-              onClick={onDismiss}
-              size="icon"
-              type="button"
-              variant="ghost"
-            >
-              <X />
-            </Button>
-          </ActionTooltip>
+            <X />
+          </Button>
         </div>
 
         <div className="space-y-3 px-4 py-4 sm:px-5">
@@ -1111,19 +1383,14 @@ function FocusCompletionReviewModal({
         </div>
 
         <div className="flex justify-end border-t border-border px-4 py-4 sm:px-5">
-          <ActionTooltip
-            content="Leave these tasks unchanged"
-            tooltipId="focus-review-dismiss-tooltip"
+          <Button
+            aria-describedby="focus-review-dismiss-tooltip"
+            onClick={onDismiss}
+            type="button"
+            variant="secondary"
           >
-            <Button
-              aria-describedby="focus-review-dismiss-tooltip"
-              onClick={onDismiss}
-              type="button"
-              variant="secondary"
-            >
-              Review later
-            </Button>
-          </ActionTooltip>
+            Review later
+          </Button>
         </div>
       </div>
     </div>
@@ -1155,21 +1422,16 @@ function FocusSessionMessageOverlay({
             </span>
             <p className="text-sm text-muted-foreground">{message}</p>
           </div>
-          <ActionTooltip
-            content="Close focus message"
-            tooltipId="focus-message-close-tooltip"
+          <Button
+            aria-describedby="focus-message-close-tooltip"
+            aria-label="Close focus message"
+            onClick={onDismiss}
+            size="icon"
+            type="button"
+            variant="ghost"
           >
-            <Button
-              aria-describedby="focus-message-close-tooltip"
-              aria-label="Close focus message"
-              onClick={onDismiss}
-              size="icon"
-              type="button"
-              variant="ghost"
-            >
-              <X />
-            </Button>
-          </ActionTooltip>
+            <X />
+          </Button>
         </div>
       </div>
     </div>
@@ -1200,7 +1462,7 @@ function FocusSessionDock() {
       aria-label={
         activeTimer.isBreak ? "Active break timer" : "Active focus session"
       }
-      className="fixed bottom-20 right-5 z-40 w-[calc(100vw-2.5rem)] max-w-sm overflow-hidden rounded-lg border border-border bg-card text-card-foreground shadow-xl sm:bottom-24 sm:right-8"
+      className="fixed bottom-20 right-5 z-40 w-[calc(100vw-2.5rem)] max-w-sm overflow-visible rounded-lg border border-border bg-card text-card-foreground shadow-xl sm:bottom-24 sm:right-8"
     >
       <div className="border-b border-border px-4 py-3">
         <div className="flex items-start justify-between gap-3">
@@ -1262,6 +1524,7 @@ function FocusSessionDock() {
           <ActionTooltip
             className="col-span-2"
             content={pauseResumeLabel}
+            side="top"
             tooltipId="focus-dock-pause-resume-tooltip"
           >
             <Button
@@ -1283,6 +1546,7 @@ function FocusSessionDock() {
             content={
               activeTimer.isBreak ? "End break" : "Complete focus session"
             }
+            side="top"
             tooltipId="focus-dock-complete-tooltip"
           >
             <Button
@@ -1301,6 +1565,7 @@ function FocusSessionDock() {
           </ActionTooltip>
           <ActionTooltip
             content="Open mini-window"
+            side="top"
             tooltipId="focus-dock-mini-window-tooltip"
           >
             <Button
@@ -1316,6 +1581,7 @@ function FocusSessionDock() {
           </ActionTooltip>
           <ActionTooltip
             content={activeTimer.isBreak ? "Skip break" : "Stop focus session"}
+            side="top"
             tooltipId="focus-dock-stop-tooltip"
           >
             <Button

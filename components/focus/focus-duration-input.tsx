@@ -1,5 +1,8 @@
 "use client";
 
+import { ChevronDown, ChevronUp } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+
 import { FieldHelpTooltip } from "@/components/ui/field-help-tooltip";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,6 +26,9 @@ type FocusDurationInputProps = {
 };
 
 type DurationPart = "hours" | "minutes" | "seconds";
+type SegmentInputs = Record<DurationPart, string>;
+
+const durationParts: DurationPart[] = ["hours", "minutes", "seconds"];
 
 const segmentLabels: Record<DurationPart, string> = {
   hours: "Hours",
@@ -34,14 +40,43 @@ function padSegment(value: number) {
   return String(value).padStart(2, "0");
 }
 
-function parseSegment(value: string, maxValue: number) {
-  const digits = value.replace(/\D/g, "").slice(0, 2);
+function partsToInputs(totalSeconds: number): SegmentInputs {
+  const parts = secondsToClockParts(totalSeconds);
+
+  return {
+    hours: padSegment(parts.hours),
+    minutes: padSegment(parts.minutes),
+    seconds: padSegment(parts.seconds),
+  };
+}
+
+function getPartMax(part: DurationPart) {
+  return part === "hours" ? 99 : 59;
+}
+
+function sanitizeSegment(value: string) {
+  return value.replace(/\D/g, "").slice(0, 2);
+}
+
+function parseSegment(value: string, part: DurationPart) {
+  const digits = sanitizeSegment(value);
 
   if (!digits) {
     return 0;
   }
 
-  return Math.min(maxValue, Number(digits));
+  return Math.min(getPartMax(part), Number(digits));
+}
+
+function inputsToSeconds(inputs: SegmentInputs, maxSeconds: number) {
+  return Math.min(
+    maxSeconds,
+    clockPartsToSeconds({
+      hours: parseSegment(inputs.hours, "hours"),
+      minutes: parseSegment(inputs.minutes, "minutes"),
+      seconds: parseSegment(inputs.seconds, "seconds"),
+    }),
+  );
 }
 
 export function FocusDurationInput({
@@ -56,17 +91,59 @@ export function FocusDurationInput({
   value,
 }: FocusDurationInputProps) {
   const safeValue = Math.max(0, Math.min(maxSeconds, Math.floor(value)));
-  const parts = secondsToClockParts(safeValue);
+  const normalizedInputs = useMemo(() => partsToInputs(safeValue), [safeValue]);
+  const [focusedPart, setFocusedPart] = useState<DurationPart | null>(null);
+  const [inputs, setInputs] = useState<SegmentInputs>(normalizedInputs);
   const hintId = `${id}-hint`;
 
-  function handlePartChange(part: DurationPart, rawValue: string) {
-    const nextParts = {
-      ...parts,
-      [part]: parseSegment(rawValue, part === "hours" ? 99 : 59),
-    };
-    const nextSeconds = Math.min(maxSeconds, clockPartsToSeconds(nextParts));
+  useEffect(() => {
+    if (focusedPart) {
+      return;
+    }
 
-    onChange(nextSeconds);
+    setInputs(normalizedInputs);
+  }, [focusedPart, normalizedInputs]);
+
+  function updateInputs(nextInputs: SegmentInputs) {
+    setInputs(nextInputs);
+    onChange(inputsToSeconds(nextInputs, maxSeconds));
+  }
+
+  function handlePartChange(part: DurationPart, rawValue: string) {
+    const nextInputs = {
+      ...inputs,
+      [part]: sanitizeSegment(rawValue),
+    };
+
+    updateInputs(nextInputs);
+  }
+
+  function handlePartBlur(part: DurationPart) {
+    const nextInputs = {
+      ...inputs,
+      [part]: padSegment(parseSegment(inputs[part], part)),
+    };
+
+    setFocusedPart(null);
+    updateInputs(nextInputs);
+  }
+
+  function stepPart(part: DurationPart, step: 1 | -1) {
+    if (disabled) {
+      return;
+    }
+
+    const currentValue = parseSegment(inputs[part], part);
+    const nextValue = Math.max(
+      0,
+      Math.min(getPartMax(part), currentValue + step),
+    );
+    const nextInputs = {
+      ...inputs,
+      [part]: padSegment(nextValue),
+    };
+
+    updateInputs(nextInputs);
   }
 
   return (
@@ -80,11 +157,13 @@ export function FocusDurationInput({
       <div
         aria-describedby={hintId}
         aria-label={label}
-        className="flex items-center gap-2"
+        className="flex flex-wrap items-center gap-2"
         role="group"
       >
-        {(["hours", "minutes", "seconds"] as DurationPart[]).map(
-          (part, index) => (
+        {durationParts.map((part, index) => {
+          const segmentLabel = segmentLabels[part];
+
+          return (
             <div className="flex items-center gap-2" key={part}>
               {index > 0 ? (
                 <span
@@ -94,25 +173,49 @@ export function FocusDurationInput({
                   :
                 </span>
               ) : null}
-              <Input
-                aria-label={segmentLabels[part]}
-                className="h-10 w-16 text-center font-mono text-base tabular-nums"
-                disabled={disabled}
-                id={`${id}-${part}`}
-                inputMode="numeric"
-                maxLength={2}
-                onChange={(event) => {
-                  handlePartChange(part, event.currentTarget.value);
-                }}
-                onFocus={(event) => {
-                  event.currentTarget.select();
-                }}
-                pattern="[0-9]*"
-                value={padSegment(parts[part])}
-              />
+              <div className="relative w-20">
+                <Input
+                  aria-label={segmentLabel}
+                  className="h-12 pr-7 text-center font-mono text-base tabular-nums"
+                  disabled={disabled}
+                  id={`${id}-${part}`}
+                  inputMode="numeric"
+                  maxLength={2}
+                  onBlur={() => handlePartBlur(part)}
+                  onChange={(event) => {
+                    handlePartChange(part, event.currentTarget.value);
+                  }}
+                  onFocus={(event) => {
+                    setFocusedPart(part);
+                    event.currentTarget.select();
+                  }}
+                  pattern="[0-9]*"
+                  value={inputs[part]}
+                />
+                <div className="absolute right-1 top-1/2 flex -translate-y-1/2 flex-col">
+                  <button
+                    aria-label={`Increase ${segmentLabel.toLowerCase()}`}
+                    className="inline-flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40"
+                    disabled={disabled}
+                    onClick={() => stepPart(part, 1)}
+                    type="button"
+                  >
+                    <ChevronUp className="size-3.5" />
+                  </button>
+                  <button
+                    aria-label={`Decrease ${segmentLabel.toLowerCase()}`}
+                    className="inline-flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40"
+                    disabled={disabled}
+                    onClick={() => stepPart(part, -1)}
+                    type="button"
+                  >
+                    <ChevronDown className="size-3.5" />
+                  </button>
+                </div>
+              </div>
             </div>
-          ),
-        )}
+          );
+        })}
       </div>
       <p className="text-xs text-muted-foreground" id={hintId}>
         {hint}

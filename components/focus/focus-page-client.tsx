@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   Coffee,
   Pause,
+  PictureInPicture2,
   Play,
   RotateCw,
   Square,
@@ -25,12 +26,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { FieldHelpTooltip } from "@/components/ui/field-help-tooltip";
 import { Label } from "@/components/ui/label";
-import {
-  formatFocusClock,
-  MAX_DEEP_WORK_DURATION_SECONDS,
-  MAX_POMODORO_BREAK_SECONDS,
-  MAX_POMODORO_DURATION_SECONDS,
-} from "@/lib/focus/time";
+import { formatFocusClock } from "@/lib/focus/time";
 import type { FocusSessionType } from "@/lib/focus/types";
 import { cn } from "@/lib/utils";
 
@@ -57,12 +53,6 @@ function getTaskMeta(task: {
     .join(" | ");
 }
 
-function getMaxDurationSeconds(mode: FocusMode) {
-  return mode === "pomodoro"
-    ? MAX_POMODORO_DURATION_SECONDS
-    : MAX_DEEP_WORK_DURATION_SECONDS;
-}
-
 function FieldLabelWithHelp({
   fieldLabel,
   helpText,
@@ -86,6 +76,7 @@ export function FocusPageClient() {
     defaultBreakSeconds,
     defaultFocusSeconds,
     isPending,
+    openMiniWindow,
     pauseSession,
     recentTasks,
     refreshFocusData,
@@ -115,9 +106,7 @@ export function FocusPageClient() {
   );
 
   useEffect(() => {
-    setDurationSeconds((current) =>
-      Math.min(defaultFocusSeconds, current || defaultFocusSeconds),
-    );
+    setDurationSeconds((current) => current || defaultFocusSeconds);
   }, [defaultFocusSeconds]);
 
   useEffect(() => {
@@ -132,9 +121,6 @@ export function FocusPageClient() {
 
   function handleModeChange(nextMode: FocusMode) {
     setMode(nextMode);
-    setDurationSeconds((current) =>
-      Math.min(current, getMaxDurationSeconds(nextMode)),
-    );
     setDurationError(null);
   }
 
@@ -154,27 +140,8 @@ export function FocusPageClient() {
       return;
     }
 
-    if (
-      mode === "pomodoro" &&
-      durationSeconds > MAX_POMODORO_DURATION_SECONDS
-    ) {
-      setDurationError("Pomodoro max is 00:55:00.");
-      return;
-    }
-
-    if (
-      mode === "deep_work" &&
-      durationSeconds > MAX_DEEP_WORK_DURATION_SECONDS
-    ) {
-      setDurationError("Deep Work max is 12:00:00.");
-      return;
-    }
-
-    if (
-      mode === "pomodoro" &&
-      (breakSeconds <= 0 || breakSeconds > MAX_POMODORO_BREAK_SECONDS)
-    ) {
-      setDurationError("Break duration must be between 00:00:01 and 00:10:00.");
+    if (mode === "pomodoro" && breakSeconds <= 0) {
+      setDurationError("Choose a break duration.");
       return;
     }
 
@@ -202,20 +169,15 @@ export function FocusPageClient() {
             Stay with one session.
           </h1>
         </div>
-        <ActionTooltip
-          content="Reload the active timer and recent tasks"
-          tooltipId="focus-refresh-tooltip"
+        <Button
+          aria-describedby="focus-refresh-tooltip"
+          onClick={refreshFocusData}
+          type="button"
+          variant="outline"
         >
-          <Button
-            aria-describedby="focus-refresh-tooltip"
-            onClick={refreshFocusData}
-            type="button"
-            variant="outline"
-          >
-            <RotateCw />
-            Refresh
-          </Button>
-        </ActionTooltip>
+          <RotateCw />
+          Refresh
+        </Button>
       </div>
 
       {activeTimer ? (
@@ -296,6 +258,21 @@ export function FocusPageClient() {
                 </Button>
               </ActionTooltip>
               <ActionTooltip
+                content="Open the mini-window"
+                tooltipId="focus-active-mini-window-tooltip"
+              >
+                <Button
+                  aria-describedby="focus-active-mini-window-tooltip"
+                  aria-label="Open mini-window"
+                  onClick={openMiniWindow}
+                  type="button"
+                  variant="outline"
+                >
+                  <PictureInPicture2 />
+                  Open mini-window
+                </Button>
+              </ActionTooltip>
+              <ActionTooltip
                 content={
                   activeTimer.isBreak ? "Skip the break" : "Stop the session"
                 }
@@ -328,32 +305,26 @@ export function FocusPageClient() {
               <div className="space-y-2">
                 <FieldLabelWithHelp
                   fieldLabel="Mode"
-                  helpText="Pomodoro caps focus at 55 minutes and starts a break. Deep Work supports longer focus without a break."
+                  helpText="Pomodoro starts a break after the focus timer. Deep Work supports longer focus without a break."
                 />
                 <div className="inline-flex rounded-md border border-border bg-background p-1">
                   {focusModes.map((item) => {
                     const tooltipId = `focus-mode-${item}-tooltip`;
 
                     return (
-                      <ActionTooltip
-                        align="center"
-                        content={`Use ${modeLabels[item]} timing`}
+                      <button
+                        aria-describedby={tooltipId}
+                        className={cn(
+                          "inline-flex h-9 items-center rounded-sm px-3 text-sm font-medium text-muted-foreground transition-colors",
+                          mode === item && "bg-card text-primary shadow-sm",
+                        )}
+                        id={`focus-mode-${item}`}
+                        onClick={() => handleModeChange(item)}
+                        type="button"
                         key={item}
-                        tooltipId={tooltipId}
                       >
-                        <button
-                          aria-describedby={tooltipId}
-                          className={cn(
-                            "inline-flex h-9 items-center rounded-sm px-3 text-sm font-medium text-muted-foreground transition-colors",
-                            mode === item && "bg-card text-primary shadow-sm",
-                          )}
-                          id={`focus-mode-${item}`}
-                          onClick={() => handleModeChange(item)}
-                          type="button"
-                        >
-                          {modeLabels[item]}
-                        </button>
-                      </ActionTooltip>
+                        {modeLabels[item]}
+                      </button>
                     );
                   })}
                 </div>
@@ -395,9 +366,7 @@ export function FocusPageClient() {
                             className="min-w-0 flex-1 cursor-pointer text-sm font-medium leading-5 text-foreground"
                             htmlFor={checkboxId}
                           >
-                            <span className="block truncate">
-                              {task.title}
-                            </span>
+                            <span className="block truncate">{task.title}</span>
                             <span className="mt-1 block text-xs font-normal leading-5 text-muted-foreground">
                               {getTaskMeta(task)}
                             </span>
@@ -416,12 +385,11 @@ export function FocusPageClient() {
               <FocusDurationInput
                 helpText={
                   mode === "pomodoro"
-                    ? "Set the focus length. Pomodoro sessions can be up to 55 minutes."
-                    : "Set the focus length. Deep Work sessions can be up to 12 hours."
+                    ? "Set the Pomodoro focus length."
+                    : "Set the Deep Work focus length."
                 }
-                hint={mode === "pomodoro" ? "Max 00:55:00." : "Max 12:00:00."}
+                hint="Set hours, minutes, and seconds."
                 id="focus-duration"
-                maxSeconds={getMaxDurationSeconds(mode)}
                 onChange={(value) => {
                   setDurationSeconds(value);
                   setDurationError(null);
@@ -432,10 +400,9 @@ export function FocusPageClient() {
               {mode === "pomodoro" ? (
                 <FocusDurationInput
                   helpText="Set the short break that starts after the Pomodoro completes."
-                  hint="Max 00:10:00."
+                  hint="Set hours, minutes, and seconds."
                   id="focus-break"
                   label="Break duration"
-                  maxSeconds={MAX_POMODORO_BREAK_SECONDS}
                   onChange={(value) => {
                     setBreakSeconds(value);
                     setDurationError(null);
@@ -450,21 +417,15 @@ export function FocusPageClient() {
                 </p>
               ) : null}
 
-              <ActionTooltip
-                align="left"
-                content="Start a focus timer with these settings"
-                tooltipId="focus-start-session-tooltip"
+              <Button
+                aria-describedby="focus-start-session-tooltip"
+                disabled={isPending}
+                onClick={handleStart}
+                type="button"
               >
-                <Button
-                  aria-describedby="focus-start-session-tooltip"
-                  disabled={isPending}
-                  onClick={handleStart}
-                  type="button"
-                >
-                  <Timer />
-                  Start session
-                </Button>
-              </ActionTooltip>
+                <Timer />
+                Start session
+              </Button>
             </CardContent>
           </Card>
 

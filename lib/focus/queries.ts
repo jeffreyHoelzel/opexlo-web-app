@@ -8,7 +8,7 @@ import type {
 } from "@/lib/focus/types";
 import {
   DEFAULT_POMODORO_BREAK_SECONDS,
-  MAX_POMODORO_BREAK_SECONDS,
+  MAX_FOCUS_DURATION_SECONDS,
 } from "@/lib/focus/time";
 import {
   getRecentActiveTasks,
@@ -42,8 +42,8 @@ function toFocusSessionType(sessionType: string): FocusSessionType {
   return "deep_work";
 }
 
-function clampBreakSeconds(value: number) {
-  return Math.max(1, Math.min(MAX_POMODORO_BREAK_SECONDS, value));
+function clampDefaultSeconds(value: number) {
+  return Math.max(1, Math.min(MAX_FOCUS_DURATION_SECONDS, value));
 }
 
 function toTaskSummary(
@@ -196,8 +196,7 @@ export async function getOpenFocusSession(context?: FocusQueryContext) {
 
 export async function getFocusBootstrapData(): Promise<FocusBootstrapData> {
   const context = await getTaskQueryContext();
-  const [activeSession, preferencesResult, recentTasks] = await Promise.all([
-    getOpenFocusSession(context),
+  const [preferencesResult, recentTasks] = await Promise.all([
     context.supabase
       .from("user_preferences")
       .select("default_focus_minutes,default_break_minutes")
@@ -211,14 +210,15 @@ export async function getFocusBootstrapData(): Promise<FocusBootstrapData> {
   }
 
   return {
-    activeSession,
-    defaultBreakSeconds: clampBreakSeconds(
+    activeSession: null,
+    defaultBreakSeconds: clampDefaultSeconds(
       (preferencesResult.data?.default_break_minutes ?? DEFAULT_BREAK_MINUTES) *
         60,
     ),
-    defaultFocusSeconds:
+    defaultFocusSeconds: clampDefaultSeconds(
       (preferencesResult.data?.default_focus_minutes ?? DEFAULT_FOCUS_MINUTES) *
-      60,
+        60,
+    ),
     recentTasks: recentTasks.map((task) => ({
       estimated_minutes: task.estimated_minutes,
       id: task.id,
@@ -228,5 +228,6 @@ export async function getFocusBootstrapData(): Promise<FocusBootstrapData> {
       status: task.status,
       title: task.title,
     })),
+    userId: context.userId,
   };
 }

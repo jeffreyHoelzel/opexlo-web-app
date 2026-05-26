@@ -41,11 +41,25 @@ export type FocusSessionSnapshot = {
   tasks: FocusTaskSummary[];
 };
 
+export type FocusSessionDraft = {
+  activeStartedAt: string | null;
+  breakSeconds: number | null;
+  elapsedSeconds: number;
+  plannedSeconds: number;
+  sessionType: FocusSessionType;
+  startedAt: string;
+  status: "active" | "paused";
+  taskId: string | null;
+  taskIds: string[];
+  tasks: FocusTaskSummary[];
+};
+
 export type FocusBootstrapData = {
   activeSession: FocusSessionSnapshot | null;
   defaultBreakSeconds: number;
   defaultFocusSeconds: number;
   recentTasks: FocusTaskSummary[];
+  userId: string;
 };
 
 export type StartFocusSessionInput = {
@@ -53,6 +67,16 @@ export type StartFocusSessionInput = {
   plannedSeconds?: number | null;
   sessionType?: FocusSessionType;
   taskId?: string | null;
+  taskIds?: string[];
+};
+
+export type CompleteFocusSessionInput = {
+  breakSeconds?: number | null;
+  elapsedSeconds: number;
+  endedAt: string;
+  plannedSeconds: number;
+  sessionType: FocusSessionType;
+  startedAt: string;
   taskIds?: string[];
 };
 
