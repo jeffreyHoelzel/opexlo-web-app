@@ -9,6 +9,7 @@ import {
 
 import { FocusStartButton } from "@/components/focus/focus-start-button";
 import { TaskList } from "@/components/tasks/task-list";
+import { TimeBlockingPanel } from "@/components/time-blocks/time-blocking-panel";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -18,9 +19,11 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import type { TaskListItem } from "@/lib/tasks/types";
+import type { TimeBlockDayData } from "@/lib/time-blocks/types";
 
 type TodayDashboardProps = {
   tasks: TaskListItem[];
+  timeBlockData: TimeBlockDayData;
   todayDate: string;
   timezone: string;
 };
@@ -46,6 +49,7 @@ function formatMinutes(minutes: number) {
 
 export function TodayDashboard({
   tasks,
+  timeBlockData,
   todayDate,
   timezone,
 }: TodayDashboardProps) {
@@ -158,24 +162,33 @@ export function TodayDashboard({
         </Card>
       </section>
 
+      <TimeBlockingPanel
+        blocks={timeBlockData.blocks}
+        date={timeBlockData.date}
+        description="Create time blocks for the work that needs structure today."
+        taskOptions={timeBlockData.taskOptions}
+        timezone={timeBlockData.timezone}
+        title="Time blocks"
+      />
+
       <section className="grid gap-4 lg:grid-cols-[1fr_22rem]">
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-xl">
               <CheckCircle2 className="size-5 text-primary" />
-              Planned tasks
+              Unblocked tasks
             </CardTitle>
             <CardDescription>
-              Tasks with today as their planned date.
+              Planned tasks that are not currently on the schedule.
             </CardDescription>
           </CardHeader>
           <CardContent>
             <TaskList
               editReturnPath="/app/today"
-              emptyDescription="Use the floating task button or plan an inbox task for today."
-              emptyTitle="Nothing planned for today"
+              emptyDescription="Every planned task has a time block, or there is nothing planned for today."
+              emptyTitle="No unblocked tasks"
               showUnplan
-              tasks={tasks}
+              tasks={timeBlockData.unblockedTasks}
             />
           </CardContent>
         </Card>
