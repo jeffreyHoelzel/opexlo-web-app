@@ -2,14 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import {
-  CalendarClock,
-  CalendarPlus,
-  Minus,
-  Plus,
-  Trash2,
-  X,
-} from "lucide-react";
+import { CalendarClock, CalendarPlus, Trash2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -329,36 +322,6 @@ export function TimeBlockingPanel({
     });
   }
 
-  function shiftModalTimes(startDeltaMinutes: number, endDeltaMinutes: number) {
-    const startMinutes = parseTimeToMinutes(formState.startTime);
-    const endMinutes = parseTimeToMinutes(formState.endTime);
-
-    if (startMinutes === null || endMinutes === null) {
-      setError("Use valid start and end times.");
-      return;
-    }
-
-    const nextStartMinutes = startMinutes + startDeltaMinutes;
-    const nextEndMinutes = endMinutes + endDeltaMinutes;
-
-    if (nextStartMinutes < 0 || nextEndMinutes > LATEST_MODAL_END_MINUTES) {
-      setError("Time blocks must stay inside the selected day.");
-      return;
-    }
-
-    if (nextEndMinutes - nextStartMinutes < TIME_BLOCK_STEP_MINUTES) {
-      setError("Time blocks must be at least 15 minutes.");
-      return;
-    }
-
-    setError(null);
-    setFormState((current) => ({
-      ...current,
-      endTime: minutesToTimeInput(nextEndMinutes),
-      startTime: minutesToTimeInput(nextStartMinutes),
-    }));
-  }
-
   return (
     <>
       <Card>
@@ -577,7 +540,7 @@ export function TimeBlockingPanel({
       </Card>
 
       {isModalOpen ? (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-foreground/25 p-3 backdrop-blur-sm sm:items-center sm:p-6">
+        <div className="fixed inset-0 z-50 !m-0 flex items-end justify-center bg-foreground/25 p-3 backdrop-blur-sm sm:items-center sm:p-6">
           <div
             aria-modal="true"
             className="max-h-full w-full max-w-xl overflow-hidden rounded-lg border border-border bg-card text-card-foreground shadow-xl"
@@ -605,7 +568,7 @@ export function TimeBlockingPanel({
             </div>
 
             <form
-              className="max-h-[calc(100vh-9rem)] overflow-y-auto px-4 py-5 sm:px-6"
+              className="px-4 py-5 sm:px-6"
               onSubmit={(event) => {
                 event.preventDefault();
                 runAction(() =>
@@ -744,59 +707,6 @@ export function TimeBlockingPanel({
                     />
                   </div>
                 </div>
-
-                {formState.blockId ? (
-                  <div className="grid gap-2 sm:grid-cols-4">
-                    <Button
-                      disabled={isPending}
-                      onClick={() =>
-                        shiftModalTimes(
-                          -TIME_BLOCK_STEP_MINUTES,
-                          -TIME_BLOCK_STEP_MINUTES,
-                        )
-                      }
-                      type="button"
-                      variant="outline"
-                    >
-                      Earlier
-                    </Button>
-                    <Button
-                      disabled={isPending}
-                      onClick={() =>
-                        shiftModalTimes(
-                          TIME_BLOCK_STEP_MINUTES,
-                          TIME_BLOCK_STEP_MINUTES,
-                        )
-                      }
-                      type="button"
-                      variant="outline"
-                    >
-                      Later
-                    </Button>
-                    <Button
-                      disabled={isPending}
-                      onClick={() =>
-                        shiftModalTimes(0, -TIME_BLOCK_STEP_MINUTES)
-                      }
-                      type="button"
-                      variant="outline"
-                    >
-                      <Minus />
-                      Shorten
-                    </Button>
-                    <Button
-                      disabled={isPending}
-                      onClick={() =>
-                        shiftModalTimes(0, TIME_BLOCK_STEP_MINUTES)
-                      }
-                      type="button"
-                      variant="outline"
-                    >
-                      <Plus />
-                      Extend
-                    </Button>
-                  </div>
-                ) : null}
               </div>
 
               <div className="mt-5 flex flex-col-reverse gap-2 border-t border-border pt-4 sm:flex-row sm:justify-between">
