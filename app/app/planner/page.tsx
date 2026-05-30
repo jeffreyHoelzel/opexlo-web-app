@@ -1,8 +1,23 @@
-import { TimeBlockingPanel } from "@/components/time-blocks/time-blocking-panel";
-import { getTimeBlockDayData } from "@/lib/time-blocks/queries";
+import { PlannerCalendar } from "@/components/planner/planner-calendar";
+import { getPlannerCalendarData } from "@/lib/planner/queries";
 
-export default async function PlannerPage() {
-  const timeBlockData = await getTimeBlockDayData();
+type PlannerPageProps = {
+  searchParams: Promise<{
+    date?: string | string[];
+    view?: string | string[];
+  }>;
+};
+
+function firstParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+export default async function PlannerPage({ searchParams }: PlannerPageProps) {
+  const resolvedSearchParams = await searchParams;
+  const plannerData = await getPlannerCalendarData({
+    date: firstParam(resolvedSearchParams.date),
+    view: firstParam(resolvedSearchParams.view),
+  });
 
   return (
     <div className="space-y-6">
@@ -14,21 +29,12 @@ export default async function PlannerPage() {
           Shape today before the work starts.
         </h1>
         <p className="mt-4 max-w-2xl text-base leading-7 text-muted-foreground">
-          Schedule useful structure for {timeBlockData.date} without connecting
-          an external calendar.
+          Schedule useful structure for {plannerData.date} without connecting an
+          external calendar.
         </p>
       </div>
 
-      <TimeBlockingPanel
-        blocks={timeBlockData.blocks}
-        date={timeBlockData.date}
-        description="Place planned tasks into realistic blocks and leave flexible work unscheduled."
-        showUnblockedTasks
-        taskOptions={timeBlockData.taskOptions}
-        timezone={timeBlockData.timezone}
-        title="Daily schedule"
-        unblockedTasks={timeBlockData.unblockedTasks}
-      />
+      <PlannerCalendar data={plannerData} />
     </div>
   );
 }

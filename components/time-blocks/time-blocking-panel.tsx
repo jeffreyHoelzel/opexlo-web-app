@@ -61,6 +61,7 @@ const TIMELINE_MINUTE_HEIGHT = 1;
 const TIMELINE_TOP_PADDING = 16;
 const TIMELINE_BOTTOM_PADDING = 24;
 const TIMELINE_VIEWPORT_HEIGHT = "min(70vh, 38rem)";
+const SUCCESS_MESSAGE_TIMEOUT_MS = 3000;
 
 function formatHour(minutes: number) {
   const hour = Math.floor(minutes / 60);
@@ -265,6 +266,18 @@ export function TimeBlockingPanel({
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isModalOpen]);
+
+  useEffect(() => {
+    if (!message) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setMessage(null);
+    }, SUCCESS_MESSAGE_TIMEOUT_MS);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [message]);
 
   function openModal(nextFormState: TimeBlockFormState) {
     setError(null);

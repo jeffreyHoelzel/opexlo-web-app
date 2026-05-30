@@ -1,4 +1,8 @@
 import type { TaskListItem } from "@/lib/tasks/types";
+import type {
+  TimeBlockDayData,
+  TimeBlockTaskSummary,
+} from "@/lib/time-blocks/types";
 
 export type PlannerReminderDefaults = {
   daily_planning_reminders_enabled: boolean;
@@ -44,4 +48,35 @@ export type MindfulPlanningWelcomeInput = {
   reminderEnabled?: boolean;
   reminderTime?: string | null;
   selectedTasks?: MindfulPlanningTaskInput[];
+};
+
+export type PlannerCalendarView = "day" | "month" | "week" | "year";
+
+export type PlannerCalendarRangeBlock = {
+  duration_minutes: number;
+  end_at: string;
+  end_local_date: string;
+  end_minutes: number;
+  end_time: string;
+  id: string;
+  start_at: string;
+  start_local_date: string;
+  start_minutes: number;
+  start_time: string;
+  task: TimeBlockTaskSummary | null;
+  task_id: string | null;
+  title: string;
+};
+
+export type PlannerCalendarData = {
+  date: string;
+  range: {
+    endDateExclusive: string;
+    startDate: string;
+  };
+  rangeBlocks: PlannerCalendarRangeBlock[];
+  selectedDay: TimeBlockDayData;
+  timezone: string;
+  todayDate: string;
+  view: PlannerCalendarView;
 };
