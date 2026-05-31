@@ -153,40 +153,6 @@ async function getTimeBlockOrThrow(
   return data;
 }
 
-async function ensureNoOverlap({
-  context,
-  endAt,
-  excludeBlockId,
-  startAt,
-}: {
-  context: TimeBlockActionContext;
-  endAt: string;
-  excludeBlockId?: string | null;
-  startAt: string;
-}) {
-  let query = context.supabase
-    .from("time_blocks")
-    .select("id")
-    .eq("user_id", context.userId)
-    .lt("start_at", endAt)
-    .gt("end_at", startAt)
-    .limit(1);
-
-  if (excludeBlockId) {
-    query = query.neq("id", excludeBlockId);
-  }
-
-  const { data, error } = await query;
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  if ((data ?? []).length > 0) {
-    throw new Error("That time overlaps another block.");
-  }
-}
-
 async function planTaskForBlockDate(
   context: TimeBlockActionContext,
   task: { id: string; status: string } | null,
@@ -269,13 +235,6 @@ async function saveTimeBlock(
   if (!title) {
     throw new Error("Add a title or choose a task.");
   }
-
-  await ensureNoOverlap({
-    context,
-    endAt,
-    excludeBlockId: values.blockId,
-    startAt,
-  });
 
   if (values.blockId) {
     const currentBlock = await getTimeBlockOrThrow(context, values.blockId);
