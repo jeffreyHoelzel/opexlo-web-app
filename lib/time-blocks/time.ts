@@ -101,6 +101,25 @@ export function minutesToTimeInput(minutes: number) {
   return `${padTimePart(hour)}:${padTimePart(minute)}`;
 }
 
+export function formatTimeForDisplay(value: string) {
+  const minutes = parseTimeToMinutes(value);
+
+  if (minutes === null) {
+    return value;
+  }
+
+  const hour24 = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  const suffix = hour24 >= 12 ? "PM" : "AM";
+  const hour12 = hour24 % 12 === 0 ? 12 : hour24 % 12;
+
+  return `${hour12}:${padTimePart(minute)} ${suffix}`;
+}
+
+export function formatTimeRangeForDisplay(startTime: string, endTime: string) {
+  return `${formatTimeForDisplay(startTime)} - ${formatTimeForDisplay(endTime)}`;
+}
+
 export function addDaysToIsoDate(date: string, days: number) {
   const parts = getDateParts(date);
 

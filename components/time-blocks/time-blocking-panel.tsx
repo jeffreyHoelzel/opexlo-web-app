@@ -22,6 +22,7 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragOverEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
@@ -44,6 +45,7 @@ import {
   upsertTimeBlockAction,
 } from "@/lib/time-blocks/actions";
 import {
+  formatTimeRangeForDisplay,
   minutesToTimeInput,
   parseTimeToMinutes,
   TIME_BLOCK_STEP_MINUTES,
@@ -68,9 +70,12 @@ type TimeBlockingPanelProps = {
   blocks: TimeBlockItem[];
   date: string;
   description: string;
+  dndContextId?: string;
   enableDragReposition?: boolean;
+  enableOptimisticDragMoves?: boolean;
   lockedTaskId?: string;
   showUnblockedTasks?: boolean;
+  suppressDragSuccessMessage?: boolean;
   taskOptions: TimeBlockTaskOption[];
   timezone: string;
   title: string;
@@ -90,7 +95,9 @@ const SUCCESS_MESSAGE_TIMEOUT_MS = 3000;
 const ERROR_MESSAGE_TIMEOUT_MS = 2000;
 const DRAG_CLICK_SUPPRESSION_MS = 250;
 const DRAG_START_DISTANCE_PX = 4;
+const DRAG_REFRESH_SETTLE_MS = 250;
 const LANE_GAP_PX = 6;
+const DEFAULT_DND_CONTEXT_ID_PREFIX = "time-block-panel-dnd";
 
 type DaySlotDragTarget = {
   date: string;
@@ -101,6 +108,28 @@ type DaySlotDragTarget = {
 type TimeBlockDragData = {
   blockId: string;
   type: "time-block";
+};
+
+type DayDragOverride = {
+  duration_minutes: number;
+  end_minutes: number;
+  end_time: string;
+  local_date: string;
+  start_minutes: number;
+  start_time: string;
+};
+
+type DayDragPersistPayload = {
+  blockId: string;
+  override: DayDragOverride;
+  taskId: string | null;
+  title: string;
+};
+
+type DayActiveDropTarget = {
+  date: string;
+  endMinutes: number;
+  startMinutes: number;
 };
 
 function formatHour(minutes: number) {
@@ -297,7 +326,7 @@ function TimelineDropSlot({
   slotStartMinutes,
   visibleStart,
 }: TimelineDropSlotProps) {
-  const { isOver, setNodeRef } = useDroppable({
+  const { setNodeRef } = useDroppable({
     data: {
       date,
       startMinutes: slotStartMinutes,
@@ -310,9 +339,8 @@ function TimelineDropSlot({
     <div
       aria-hidden="true"
       className={cn(
-        "absolute left-[3.25rem] right-0 border-l border-transparent transition-colors sm:left-[4rem]",
+        "absolute left-[3.25rem] right-0 border-l border-transparent sm:left-[4rem]",
         isDragging ? "pointer-events-auto" : "pointer-events-none",
-        isOver && "bg-secondary/40",
       )}
       data-day-slot-target={`${date}-${slotStartMinutes}`}
       ref={setNodeRef}
@@ -386,9 +414,12 @@ export function TimeBlockingPanel({
   blocks,
   date,
   description,
+  dndContextId,
   enableDragReposition = false,
+  enableOptimisticDragMoves = false,
   lockedTaskId,
   showUnblockedTasks = false,
+  suppressDragSuccessMessage = false,
   taskOptions,
   timezone,
   title,
@@ -397,6 +428,15 @@ export function TimeBlockingPanel({
   const router = useRouter();
   const calendarScrollRef = useRef<HTMLDivElement | null>(null);
   const suppressClickUntilRef = useRef(0);
+  const queuedDragPayloadByBlockRef = useRef<Map<string, DayDragPersistPayload>>(
+    new Map(),
+  );
+  const inFlightDragSaveSeqByBlockRef = useRef<Map<string, number>>(new Map());
+  const confirmedDragOverrideByBlockRef = useRef<Record<string, DayDragOverride>>(
+    {},
+  );
+  const dragRefreshTimerRef = useRef<number | null>(null);
+  const nextDragSaveSequenceRef = useRef(1);
   const [formState, setFormState] = useState<TimeBlockFormState>(() =>
     getInitialForm(date, lockedTaskId),
   );
@@ -404,6 +444,11 @@ export function TimeBlockingPanel({
   const [activeDraggedBlockId, setActiveDraggedBlockId] = useState<
     string | null
   >(null);
+  const [activeDropTarget, setActiveDropTarget] =
+    useState<DayActiveDropTarget | null>(null);
+  const [optimisticDragOverrides, setOptimisticDragOverrides] = useState<
+    Record<string, DayDragOverride>
+  >({});
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -422,6 +467,31 @@ export function TimeBlockingPanel({
     () => taskOptions.find((task) => task.id === formState.taskId) ?? null,
     [formState.taskId, taskOptions],
   );
+  const shouldUseOptimisticDrag =
+    enableDragReposition && enableOptimisticDragMoves;
+  const resolvedBlocks = useMemo(() => {
+    if (!shouldUseOptimisticDrag) {
+      return blocks;
+    }
+
+    return blocks.map((block) => {
+      const override = optimisticDragOverrides[block.id];
+
+      if (!override) {
+        return block;
+      }
+
+      return {
+        ...block,
+        duration_minutes: override.duration_minutes,
+        end_minutes: override.end_minutes,
+        end_time: override.end_time,
+        local_date: override.local_date,
+        start_minutes: override.start_minutes,
+        start_time: override.start_time,
+      };
+    });
+  }, [blocks, optimisticDragOverrides, shouldUseOptimisticDrag]);
   const lockedTask = lockedTaskId
     ? (taskOptions.find((task) => task.id === lockedTaskId) ?? null)
     : null;
@@ -431,29 +501,55 @@ export function TimeBlockingPanel({
     [visibleRange.end, visibleRange.start],
   );
   const blocksById = useMemo(
-    () => new Map(blocks.map((block) => [block.id, block])),
-    [blocks],
+    () => new Map(resolvedBlocks.map((block) => [block.id, block])),
+    [resolvedBlocks],
   );
   const laneLayoutByBlockId = useMemo(
     () =>
       computeOverlapLaneLayout(
-        blocks.map((block) => ({
+        resolvedBlocks.map((block) => ({
           endMinutes: block.end_minutes,
           id: block.id,
           startMinutes: block.start_minutes,
         })),
       ),
-    [blocks],
+    [resolvedBlocks],
   );
   const activeDraggedBlock = activeDraggedBlockId
     ? (blocksById.get(activeDraggedBlockId) ?? null)
     : null;
+  const dragTargetRangeLabel =
+    activeDraggedBlock && activeDropTarget
+      ? formatTimeRangeForDisplay(
+          minutesToTimeInput(activeDropTarget.startMinutes),
+          minutesToTimeInput(activeDropTarget.endMinutes),
+        )
+      : null;
+  const dragPreviewStyle = useMemo(() => {
+    if (!activeDropTarget || !activeDraggedBlock) {
+      return null;
+    }
+
+    const top =
+      (activeDropTarget.startMinutes - visibleRange.start) *
+      TIMELINE_MINUTE_HEIGHT;
+    const height = Math.max(
+      28,
+      (activeDropTarget.endMinutes - activeDropTarget.startMinutes) *
+        TIMELINE_MINUTE_HEIGHT,
+    );
+
+    return {
+      height: `${height}px`,
+      top: `${top}px`,
+    } satisfies CSSProperties;
+  }, [activeDropTarget, activeDraggedBlock, visibleRange.start]);
   const firstBlockStartMinutes = useMemo(
     () =>
-      blocks.length > 0
-        ? Math.min(...blocks.map((block) => block.start_minutes))
+      resolvedBlocks.length > 0
+        ? Math.min(...resolvedBlocks.map((block) => block.start_minutes))
         : null,
-    [blocks],
+    [resolvedBlocks],
   );
   const timelineHours = getTimelineHours(visibleRange.start, visibleRange.end);
   const timelineHeight =
@@ -463,8 +559,30 @@ export function TimeBlockingPanel({
   const modalTitle = formState.blockId
     ? "Edit time block"
     : "Create time block";
+  const resolvedDndContextId =
+    dndContextId ?? `${DEFAULT_DND_CONTEXT_ID_PREFIX}-${date}`;
 
   useBodyScrollLock(isModalOpen);
+
+  useEffect(() => {
+    if (dragRefreshTimerRef.current !== null) {
+      window.clearTimeout(dragRefreshTimerRef.current);
+      dragRefreshTimerRef.current = null;
+    }
+    queuedDragPayloadByBlockRef.current.clear();
+    inFlightDragSaveSeqByBlockRef.current.clear();
+    confirmedDragOverrideByBlockRef.current = {};
+    setOptimisticDragOverrides({});
+    setActiveDropTarget(null);
+  }, [date, blocks, shouldUseOptimisticDrag]);
+
+  useEffect(() => {
+    return () => {
+      if (dragRefreshTimerRef.current !== null) {
+        window.clearTimeout(dragRefreshTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const scrollContainer = calendarScrollRef.current;
@@ -562,6 +680,7 @@ export function TimeBlockingPanel({
   function runAction(
     action: () => Promise<{ message?: string; status: string }>,
     closeOnSuccess = true,
+    showSuccessMessage = true,
   ) {
     startTransition(async () => {
       setError(null);
@@ -583,12 +702,148 @@ export function TimeBlockingPanel({
         return;
       }
 
-      setMessage(result.message ?? "Time blocks updated.");
+      if (showSuccessMessage) {
+        setMessage(result.message ?? "Time blocks updated.");
+      }
       if (closeOnSuccess) {
         setIsModalOpen(false);
       }
       router.refresh();
     });
+  }
+
+  function scheduleRefreshAfterDragSaves() {
+    if (!shouldUseOptimisticDrag) {
+      return;
+    }
+
+    if (dragRefreshTimerRef.current !== null) {
+      window.clearTimeout(dragRefreshTimerRef.current);
+    }
+
+    dragRefreshTimerRef.current = window.setTimeout(() => {
+      if (
+        inFlightDragSaveSeqByBlockRef.current.size > 0 ||
+        queuedDragPayloadByBlockRef.current.size > 0
+      ) {
+        scheduleRefreshAfterDragSaves();
+        return;
+      }
+
+      router.refresh();
+      dragRefreshTimerRef.current = null;
+    }, DRAG_REFRESH_SETTLE_MS);
+  }
+
+  function rollbackOptimisticDragMove(blockId: string) {
+    const confirmedOverride = confirmedDragOverrideByBlockRef.current[blockId];
+    setOptimisticDragOverrides((current) => {
+      if (confirmedOverride) {
+        return {
+          ...current,
+          [blockId]: confirmedOverride,
+        };
+      }
+
+      const next = { ...current };
+      delete next[blockId];
+      return next;
+    });
+  }
+
+  function persistOptimisticDragMove(payload: DayDragPersistPayload) {
+    const sequence = nextDragSaveSequenceRef.current;
+    nextDragSaveSequenceRef.current += 1;
+    inFlightDragSaveSeqByBlockRef.current.set(payload.blockId, sequence);
+
+    void (async () => {
+      let result: { message?: string; status: string };
+
+      try {
+        result = await upsertTimeBlockAction({
+          blockDate: payload.override.local_date,
+          blockId: payload.blockId,
+          endTime: payload.override.end_time,
+          startTime: payload.override.start_time,
+          taskId: payload.taskId,
+          title: payload.title,
+        });
+      } catch (actionError) {
+        result = {
+          message:
+            actionError instanceof Error
+              ? actionError.message
+              : "Unable to update time blocks.",
+          status: "error",
+        };
+      }
+
+      const activeSequence = inFlightDragSaveSeqByBlockRef.current.get(
+        payload.blockId,
+      );
+      if (activeSequence !== sequence) {
+        return;
+      }
+
+      if (result.status === "success") {
+        confirmedDragOverrideByBlockRef.current[payload.blockId] =
+          payload.override;
+      }
+
+      const queuedPayload = queuedDragPayloadByBlockRef.current.get(
+        payload.blockId,
+      );
+
+      if (queuedPayload) {
+        queuedDragPayloadByBlockRef.current.delete(payload.blockId);
+        inFlightDragSaveSeqByBlockRef.current.delete(payload.blockId);
+        persistOptimisticDragMove(queuedPayload);
+        return;
+      }
+
+      inFlightDragSaveSeqByBlockRef.current.delete(payload.blockId);
+
+      if (result.status === "error") {
+        rollbackOptimisticDragMove(payload.blockId);
+        setError(result.message ?? "Unable to update time blocks.");
+        return;
+      }
+
+      scheduleRefreshAfterDragSaves();
+    })();
+  }
+
+  function queueOptimisticDragMove(
+    block: TimeBlockItem,
+    targetStartMinutes: number,
+    targetEndMinutes: number,
+  ) {
+    const override: DayDragOverride = {
+      duration_minutes: targetEndMinutes - targetStartMinutes,
+      end_minutes: targetEndMinutes,
+      end_time: minutesToTimeInput(targetEndMinutes),
+      local_date: date,
+      start_minutes: targetStartMinutes,
+      start_time: minutesToTimeInput(targetStartMinutes),
+    };
+    const payload: DayDragPersistPayload = {
+      blockId: block.id,
+      override,
+      taskId: block.task_id,
+      title: block.title,
+    };
+
+    setOptimisticDragOverrides((current) => ({
+      ...current,
+      [block.id]: override,
+    }));
+
+    if (inFlightDragSaveSeqByBlockRef.current.has(block.id)) {
+      queuedDragPayloadByBlockRef.current.set(block.id, payload);
+      return;
+    }
+
+    persistOptimisticDragMove(payload);
   }
 
   function handleDragStart(event: DragStartEvent) {
@@ -603,6 +858,49 @@ export function TimeBlockingPanel({
 
   function handleDragCancel() {
     setActiveDraggedBlockId(null);
+    setActiveDropTarget(null);
+  }
+
+  function handleDragOver(event: DragOverEvent) {
+    const dragData = event.active.data.current as TimeBlockDragData | undefined;
+    const overId = event.over?.id.toString();
+    const overData = event.over?.data.current as DaySlotDragTarget | undefined;
+    const parsedTarget = parseDaySlotTargetId(overId);
+    const dropTarget =
+      overData?.type === "day-slot"
+        ? { date: overData.date, startMinutes: overData.startMinutes }
+        : parsedTarget;
+
+    if (dragData?.type !== "time-block") {
+      setActiveDropTarget(null);
+      return;
+    }
+
+    if (!dropTarget || dropTarget.date !== date) {
+      setActiveDropTarget(null);
+      return;
+    }
+
+    const block = blocksById.get(dragData.blockId);
+
+    if (!block) {
+      setActiveDropTarget(null);
+      return;
+    }
+
+    const durationMinutes = block.end_minutes - block.start_minutes;
+    const nextEndMinutes = dropTarget.startMinutes + durationMinutes;
+
+    if (nextEndMinutes > TIMELINE_DAY_END_MINUTES) {
+      setActiveDropTarget(null);
+      return;
+    }
+
+    setActiveDropTarget({
+      date: dropTarget.date,
+      endMinutes: nextEndMinutes,
+      startMinutes: dropTarget.startMinutes,
+    });
   }
 
   function handleDragEnd(event: DragEndEvent) {
@@ -616,6 +914,7 @@ export function TimeBlockingPanel({
         : parsedTarget;
 
     setActiveDraggedBlockId(null);
+    setActiveDropTarget(null);
 
     if (dragData?.type !== "time-block") {
       return;
@@ -646,6 +945,11 @@ export function TimeBlockingPanel({
       return;
     }
 
+    if (shouldUseOptimisticDrag) {
+      queueOptimisticDragMove(block, nextStartMinutes, nextEndMinutes);
+      return;
+    }
+
     runAction(
       () =>
         upsertTimeBlockAction({
@@ -657,6 +961,7 @@ export function TimeBlockingPanel({
           title: block.title,
         }),
       false,
+      !suppressDragSuccessMessage,
     );
   }
 
@@ -680,8 +985,10 @@ export function TimeBlockingPanel({
         <CardContent className="space-y-5">
           <DndContext
             collisionDetection={pointerWithin}
+            id={resolvedDndContextId}
             onDragCancel={handleDragCancel}
             onDragEnd={handleDragEnd}
+            onDragOver={handleDragOver}
             onDragStart={handleDragStart}
             sensors={sensors}
           >
@@ -701,9 +1008,14 @@ export function TimeBlockingPanel({
                   </p>
                 </div>
                 <span className="w-fit rounded-md bg-secondary px-2 py-1 text-xs font-medium text-secondary-foreground">
-                  {blocks.length} scheduled
+                  {resolvedBlocks.length} scheduled
                 </span>
               </div>
+              {shouldUseOptimisticDrag && dragTargetRangeLabel ? (
+                <div className="border-t border-border px-4 py-2 text-xs text-muted-foreground">
+                  Moving to {activeDropTarget?.date} at {dragTargetRangeLabel}
+                </div>
+              ) : null}
 
               <div
                 className="overflow-y-auto overflow-x-hidden"
@@ -755,7 +1067,7 @@ export function TimeBlockingPanel({
                     }}
                     type="button"
                   >
-                    {blocks.length === 0 ? (
+                    {resolvedBlocks.length === 0 ? (
                       <span className="absolute left-4 top-6 text-sm text-muted-foreground">
                         Click the calendar to create your first time block.
                       </span>
@@ -781,7 +1093,26 @@ export function TimeBlockingPanel({
                       top: `${TIMELINE_TOP_PADDING}px`,
                     }}
                   >
-                    {blocks.map((block) => {
+                    {shouldUseOptimisticDrag &&
+                    activeDraggedBlock &&
+                    dragPreviewStyle ? (
+                      <div
+                        aria-hidden="true"
+                        className="absolute left-[0.25rem] right-[0.5rem] z-20 overflow-hidden rounded-md border border-border bg-white/95 px-2.5 py-1 text-left shadow-sm"
+                        style={dragPreviewStyle}
+                      >
+                        <span className="block truncate text-sm font-semibold leading-5 text-slate-900">
+                          {activeDraggedBlock.title}
+                        </span>
+                        {dragTargetRangeLabel ? (
+                          <span className="mt-0.5 block truncate text-xs text-slate-700">
+                            {dragTargetRangeLabel}
+                          </span>
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    {resolvedBlocks.map((block) => {
                       const top =
                         (block.start_minutes - visibleRange.start) *
                         TIMELINE_MINUTE_HEIGHT;
@@ -829,7 +1160,10 @@ export function TimeBlockingPanel({
                                 {block.title}
                               </span>
                               <span className="shrink-0 text-[11px] leading-5 text-muted-foreground">
-                                {block.start_time}-{block.end_time}
+                                {formatTimeRangeForDisplay(
+                                  block.start_time,
+                                  block.end_time,
+                                )}
                               </span>
                             </span>
                           ) : (
@@ -838,7 +1172,11 @@ export function TimeBlockingPanel({
                                 {block.title}
                               </span>
                               <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-                                {block.start_time}-{block.end_time} |{" "}
+                                {formatTimeRangeForDisplay(
+                                  block.start_time,
+                                  block.end_time,
+                                )}{" "}
+                                |{" "}
                                 {formatMinutes(block.duration_minutes)}
                               </span>
                               {showTaskMeta ? (
@@ -864,13 +1202,16 @@ export function TimeBlockingPanel({
             </section>
             <DragOverlay>
               {activeDraggedBlock ? (
-                <div className="max-w-[20rem] rounded-md border border-border bg-card px-2.5 py-1 shadow-xl">
-                  <p className="truncate text-sm font-semibold text-foreground">
+                <div className="max-w-[20rem] rounded-md border border-border bg-white px-2.5 py-1 shadow-xl">
+                  <p className="truncate text-sm font-semibold text-slate-900">
                     {activeDraggedBlock.title}
                   </p>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {activeDraggedBlock.start_time}-
-                    {activeDraggedBlock.end_time}
+                  <p className="truncate text-xs text-slate-700">
+                    {dragTargetRangeLabel ??
+                      formatTimeRangeForDisplay(
+                        activeDraggedBlock.start_time,
+                        activeDraggedBlock.end_time,
+                      )}
                   </p>
                 </div>
               ) : null}

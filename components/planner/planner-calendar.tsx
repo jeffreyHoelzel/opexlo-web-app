@@ -21,6 +21,7 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragOverEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
@@ -50,6 +51,7 @@ import {
 } from "@/lib/time-blocks/actions";
 import {
   addDaysToIsoDate,
+  formatTimeRangeForDisplay,
   minutesToTimeInput,
   parseTimeToMinutes,
   TIME_BLOCK_STEP_MINUTES,
@@ -101,9 +103,11 @@ const SUCCESS_MESSAGE_TIMEOUT_MS = 3000;
 const ERROR_MESSAGE_TIMEOUT_MS = 3000;
 const DRAG_CLICK_SUPPRESSION_MS = 50;
 const DRAG_START_DISTANCE_PX = 4;
+const DRAG_REFRESH_SETTLE_MS = 250;
 const LANE_GAP_PX = 6;
 const MAX_WEEK_COLUMNS = 7;
 const MAX_MONTH_SNIPPETS = 3;
+const PLANNER_CALENDAR_DND_CONTEXT_ID = "planner-calendar-dnd";
 
 type WeekSlotDropData = {
   date: string;
@@ -125,6 +129,35 @@ type MonthBlockDragData = {
   blockId: string;
   type: "month-block";
 };
+
+type PlannerRangeDragOverride = {
+  duration_minutes: number;
+  end_local_date: string;
+  end_minutes: number;
+  end_time: string;
+  start_local_date: string;
+  start_minutes: number;
+  start_time: string;
+};
+
+type PlannerDragPersistPayload = {
+  blockId: string;
+  override: PlannerRangeDragOverride;
+  taskId: string | null;
+  title: string;
+};
+
+type PlannerActiveDropTarget =
+  | {
+      date: string;
+      endMinutes: number;
+      kind: "week";
+      startMinutes: number;
+    }
+  | {
+      date: string;
+      kind: "month";
+    };
 
 function getUtcDate(date: string) {
   return new Date(`${date}T00:00:00Z`);
@@ -271,7 +304,7 @@ function WeekSlotDropTarget({
   isDragging,
   slotStartMinutes,
 }: WeekSlotDropTargetProps) {
-  const { isOver, setNodeRef } = useDroppable({
+  const { setNodeRef } = useDroppable({
     data: {
       date,
       startMinutes: slotStartMinutes,
@@ -284,9 +317,8 @@ function WeekSlotDropTarget({
     <div
       aria-hidden="true"
       className={cn(
-        "absolute left-0 right-0 border-l border-transparent transition-colors",
+        "absolute left-0 right-0 border-l border-transparent",
         isDragging ? "pointer-events-auto" : "pointer-events-none",
-        isOver && "bg-secondary/40",
       )}
       data-week-slot-target={`${date}-${slotStartMinutes}`}
       ref={setNodeRef}
@@ -311,7 +343,7 @@ function MonthDayDropTarget({
   date,
   onClick,
 }: MonthDayDropTargetProps) {
-  const { isOver, setNodeRef } = useDroppable({
+  const { setNodeRef } = useDroppable({
     data: {
       date,
       type: "month-day",
@@ -321,7 +353,7 @@ function MonthDayDropTarget({
 
   return (
     <div
-      className={cn(className, isOver && "bg-secondary/45")}
+      className={className}
       data-month-day-target={date}
       onClick={onClick}
       onKeyDown={(event) => {
@@ -506,13 +538,22 @@ function clipBlockToVisibleHours(block: PlannerCalendarRangeBlock) {
 }
 
 function formatTimeRange(startTime: string, endTime: string) {
-  return `${startTime} - ${endTime}`;
+  return formatTimeRangeForDisplay(startTime, endTime);
 }
 
 export function PlannerCalendar({ data }: PlannerCalendarProps) {
   const router = useRouter();
   const pathname = usePathname();
   const suppressClickUntilRef = useRef(0);
+  const queuedDragPayloadByBlockRef = useRef<
+    Map<string, PlannerDragPersistPayload>
+  >(new Map());
+  const inFlightDragSaveSeqByBlockRef = useRef<Map<string, number>>(new Map());
+  const confirmedDragOverrideByBlockRef = useRef<
+    Record<string, PlannerRangeDragOverride>
+  >({});
+  const dragRefreshTimerRef = useRef<number | null>(null);
+  const nextDragSaveSequenceRef = useRef(1);
   const [formState, setFormState] = useState<PlannerBlockFormState>(() =>
     getInitialForm(data.date),
   );
@@ -521,6 +562,11 @@ export function PlannerCalendar({ data }: PlannerCalendarProps) {
   const [activeDragBlockId, setActiveDragBlockId] = useState<string | null>(
     null,
   );
+  const [activeDropTarget, setActiveDropTarget] =
+    useState<PlannerActiveDropTarget | null>(null);
+  const [optimisticDragOverrides, setOptimisticDragOverrides] = useState<
+    Record<string, PlannerRangeDragOverride>
+  >({});
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -540,13 +586,35 @@ export function PlannerCalendar({ data }: PlannerCalendarProps) {
     () => getWeekDates(data.range.startDate),
     [data.range.startDate],
   );
+  const resolvedRangeBlocks = useMemo(
+    () =>
+      data.rangeBlocks.map((block) => {
+        const override = optimisticDragOverrides[block.id];
+
+        if (!override) {
+          return block;
+        }
+
+        return {
+          ...block,
+          duration_minutes: override.duration_minutes,
+          end_local_date: override.end_local_date,
+          end_minutes: override.end_minutes,
+          end_time: override.end_time,
+          start_local_date: override.start_local_date,
+          start_minutes: override.start_minutes,
+          start_time: override.start_time,
+        };
+      }),
+    [data.rangeBlocks, optimisticDragOverrides],
+  );
   const blocksById = useMemo(
-    () => new Map(data.rangeBlocks.map((block) => [block.id, block])),
-    [data.rangeBlocks],
+    () => new Map(resolvedRangeBlocks.map((block) => [block.id, block])),
+    [resolvedRangeBlocks],
   );
   const blocksByDate = useMemo(
-    () => toDateBlocksMap(data.rangeBlocks),
-    [data.rangeBlocks],
+    () => toDateBlocksMap(resolvedRangeBlocks),
+    [resolvedRangeBlocks],
   );
   const weekLaneLayoutByDate = useMemo(() => {
     const layouts = new Map<
@@ -581,6 +649,15 @@ export function PlannerCalendar({ data }: PlannerCalendarProps) {
   const activeDragBlock = activeDragBlockId
     ? (blocksById.get(activeDragBlockId) ?? null)
     : null;
+  const dragTargetLabel =
+    activeDragBlock && activeDropTarget
+      ? activeDropTarget.kind === "week"
+        ? `${formatHeaderDate(activeDropTarget.date)} ${formatTimeRange(
+            minutesToTimeInput(activeDropTarget.startMinutes),
+            minutesToTimeInput(activeDropTarget.endMinutes),
+          )}`
+        : `${formatHeaderDate(activeDropTarget.date)} ${formatTimeRange(activeDragBlock.start_time, activeDragBlock.end_time)}`
+      : null;
   const isYearDayModalOpen = yearDayModalDate !== null;
   const yearDayModalBlocks = yearDayModalDate
     ? (blocksByDate.get(yearDayModalDate) ?? [])
@@ -590,6 +667,32 @@ export function PlannerCalendar({ data }: PlannerCalendarProps) {
     : "Create time block";
 
   useBodyScrollLock(isModalOpen || isYearDayModalOpen);
+
+  useEffect(() => {
+    if (dragRefreshTimerRef.current !== null) {
+      window.clearTimeout(dragRefreshTimerRef.current);
+      dragRefreshTimerRef.current = null;
+    }
+    queuedDragPayloadByBlockRef.current.clear();
+    inFlightDragSaveSeqByBlockRef.current.clear();
+    confirmedDragOverrideByBlockRef.current = {};
+    setOptimisticDragOverrides({});
+    setActiveDropTarget(null);
+  }, [
+    data.range.startDate,
+    data.range.endDateExclusive,
+    data.view,
+    data.date,
+    data.rangeBlocks,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      if (dragRefreshTimerRef.current !== null) {
+        window.clearTimeout(dragRefreshTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!message) {
@@ -675,6 +778,7 @@ export function PlannerCalendar({ data }: PlannerCalendarProps) {
   function runAction(
     action: () => Promise<{ message?: string; status: string }>,
     closeOnSuccess = true,
+    showSuccessMessage = true,
   ) {
     startTransition(async () => {
       setError(null);
@@ -696,7 +800,9 @@ export function PlannerCalendar({ data }: PlannerCalendarProps) {
         return;
       }
 
-      setMessage(result.message ?? "Time blocks updated.");
+      if (showSuccessMessage) {
+        setMessage(result.message ?? "Time blocks updated.");
+      }
 
       if (closeOnSuccess) {
         setIsModalOpen(false);
@@ -706,60 +812,126 @@ export function PlannerCalendar({ data }: PlannerCalendarProps) {
     });
   }
 
-  function moveBlockToDateAndTime(
-    block: PlannerCalendarRangeBlock,
-    targetDate: string,
-    targetStartMinutes: number,
-  ) {
-    const durationMinutes = block.end_minutes - block.start_minutes;
-    const targetEndMinutes = targetStartMinutes + durationMinutes;
-
-    if (targetEndMinutes > WEEK_HOUR_END) {
-      setError("Time blocks must stay inside the selected day.");
-      return;
+  function scheduleRefreshAfterDragSaves() {
+    if (dragRefreshTimerRef.current !== null) {
+      window.clearTimeout(dragRefreshTimerRef.current);
     }
 
-    if (
-      block.start_local_date === targetDate &&
-      block.start_minutes === targetStartMinutes
-    ) {
-      return;
-    }
+    dragRefreshTimerRef.current = window.setTimeout(() => {
+      if (
+        inFlightDragSaveSeqByBlockRef.current.size > 0 ||
+        queuedDragPayloadByBlockRef.current.size > 0
+      ) {
+        scheduleRefreshAfterDragSaves();
+        return;
+      }
 
-    runAction(
-      () =>
-        upsertTimeBlockAction({
-          blockDate: targetDate,
-          blockId: block.id,
-          endTime: minutesToTimeInput(targetEndMinutes),
-          startTime: minutesToTimeInput(targetStartMinutes),
-          taskId: block.task_id,
-          title: block.title,
-        }),
-      false,
-    );
+      router.refresh();
+      dragRefreshTimerRef.current = null;
+    }, DRAG_REFRESH_SETTLE_MS);
   }
 
-  function moveBlockToDatePreservingTime(
+  function rollbackOptimisticDragMove(blockId: string) {
+    const confirmedOverride = confirmedDragOverrideByBlockRef.current[blockId];
+    setOptimisticDragOverrides((current) => {
+      if (confirmedOverride) {
+        return {
+          ...current,
+          [blockId]: confirmedOverride,
+        };
+      }
+
+      const next = { ...current };
+      delete next[blockId];
+      return next;
+    });
+  }
+
+  function persistOptimisticDragMove(payload: PlannerDragPersistPayload) {
+    const sequence = nextDragSaveSequenceRef.current;
+    nextDragSaveSequenceRef.current += 1;
+    inFlightDragSaveSeqByBlockRef.current.set(payload.blockId, sequence);
+
+    void (async () => {
+      let result: { message?: string; status: string };
+
+      try {
+        result = await upsertTimeBlockAction({
+          blockDate: payload.override.start_local_date,
+          blockId: payload.blockId,
+          endTime: payload.override.end_time,
+          startTime: payload.override.start_time,
+          taskId: payload.taskId,
+          title: payload.title,
+        });
+      } catch (actionError) {
+        result = {
+          message:
+            actionError instanceof Error
+              ? actionError.message
+              : "Unable to update time blocks.",
+          status: "error",
+        };
+      }
+
+      const activeSequence = inFlightDragSaveSeqByBlockRef.current.get(
+        payload.blockId,
+      );
+
+      if (activeSequence !== sequence) {
+        return;
+      }
+
+      if (result.status === "success") {
+        confirmedDragOverrideByBlockRef.current[payload.blockId] =
+          payload.override;
+      }
+
+      const queuedPayload = queuedDragPayloadByBlockRef.current.get(
+        payload.blockId,
+      );
+
+      if (queuedPayload) {
+        queuedDragPayloadByBlockRef.current.delete(payload.blockId);
+        inFlightDragSaveSeqByBlockRef.current.delete(payload.blockId);
+        persistOptimisticDragMove(queuedPayload);
+        return;
+      }
+
+      inFlightDragSaveSeqByBlockRef.current.delete(payload.blockId);
+
+      if (result.status === "error") {
+        rollbackOptimisticDragMove(payload.blockId);
+        setError(result.message ?? "Unable to update time blocks.");
+        return;
+      }
+
+      scheduleRefreshAfterDragSaves();
+    })();
+  }
+
+  function queueOptimisticDragMove(
     block: PlannerCalendarRangeBlock,
-    targetDate: string,
+    override: PlannerRangeDragOverride,
   ) {
-    if (block.start_local_date === targetDate) {
+    const payload: PlannerDragPersistPayload = {
+      blockId: block.id,
+      override,
+      taskId: block.task_id,
+      title: block.title,
+    };
+
+    setOptimisticDragOverrides((current) => ({
+      ...current,
+      [block.id]: override,
+    }));
+
+    if (inFlightDragSaveSeqByBlockRef.current.has(block.id)) {
+      queuedDragPayloadByBlockRef.current.set(block.id, payload);
       return;
     }
 
-    runAction(
-      () =>
-        upsertTimeBlockAction({
-          blockDate: targetDate,
-          blockId: block.id,
-          endTime: block.end_time,
-          startTime: block.start_time,
-          taskId: block.task_id,
-          title: block.title,
-        }),
-      false,
-    );
+    persistOptimisticDragMove(payload);
   }
 
   function handleDragStart(event: DragStartEvent) {
@@ -777,6 +949,70 @@ export function PlannerCalendar({ data }: PlannerCalendarProps) {
 
   function handleDragCancel() {
     setActiveDragBlockId(null);
+    setActiveDropTarget(null);
+  }
+
+  function handleDragOver(event: DragOverEvent) {
+    const dragData = event.active.data.current as
+      | WeekBlockDragData
+      | MonthBlockDragData
+      | undefined;
+    const overData = event.over?.data.current as
+      | WeekSlotDropData
+      | MonthDayDropData
+      | undefined;
+    const overId = event.over?.id.toString();
+    const parsedWeekDrop = parseWeekSlotDropId(overId);
+    const parsedMonthDrop = parseMonthDayDropId(overId);
+
+    if (!dragData) {
+      setActiveDropTarget(null);
+      return;
+    }
+
+    const block = blocksById.get(dragData.blockId);
+
+    if (!block) {
+      setActiveDropTarget(null);
+      return;
+    }
+
+    const weekDropTarget =
+      overData?.type === "week-slot"
+        ? { date: overData.date, startMinutes: overData.startMinutes }
+        : parsedWeekDrop;
+    const monthDropTarget =
+      overData?.type === "month-day"
+        ? { date: overData.date }
+        : parsedMonthDrop;
+
+    if (dragData.type === "week-block" && weekDropTarget) {
+      const durationMinutes = block.end_minutes - block.start_minutes;
+      const endMinutes = weekDropTarget.startMinutes + durationMinutes;
+
+      if (endMinutes > WEEK_HOUR_END) {
+        setActiveDropTarget(null);
+        return;
+      }
+
+      setActiveDropTarget({
+        date: weekDropTarget.date,
+        endMinutes,
+        kind: "week",
+        startMinutes: weekDropTarget.startMinutes,
+      });
+      return;
+    }
+
+    if (dragData.type === "month-block" && monthDropTarget) {
+      setActiveDropTarget({
+        date: monthDropTarget.date,
+        kind: "month",
+      });
+      return;
+    }
+
+    setActiveDropTarget(null);
   }
 
   function handleDragEnd(event: DragEndEvent) {
@@ -793,6 +1029,7 @@ export function PlannerCalendar({ data }: PlannerCalendarProps) {
     const parsedMonthDrop = parseMonthDayDropId(overId);
 
     setActiveDragBlockId(null);
+    setActiveDropTarget(null);
 
     if (!dragData) {
       return;
@@ -814,18 +1051,49 @@ export function PlannerCalendar({ data }: PlannerCalendarProps) {
         : parsedMonthDrop;
 
     if (dragData.type === "week-block" && weekDropTarget) {
+      const durationMinutes = block.end_minutes - block.start_minutes;
+      const targetEndMinutes = weekDropTarget.startMinutes + durationMinutes;
+
+      if (targetEndMinutes > WEEK_HOUR_END) {
+        setError("Time blocks must stay inside the selected day.");
+        return;
+      }
+
+      if (
+        block.start_local_date === weekDropTarget.date &&
+        block.start_minutes === weekDropTarget.startMinutes
+      ) {
+        return;
+      }
+
       suppressClickUntilRef.current = Date.now() + DRAG_CLICK_SUPPRESSION_MS;
-      moveBlockToDateAndTime(
-        block,
-        weekDropTarget.date,
-        weekDropTarget.startMinutes,
-      );
+      queueOptimisticDragMove(block, {
+        duration_minutes: targetEndMinutes - weekDropTarget.startMinutes,
+        end_local_date: weekDropTarget.date,
+        end_minutes: targetEndMinutes,
+        end_time: minutesToTimeInput(targetEndMinutes),
+        start_local_date: weekDropTarget.date,
+        start_minutes: weekDropTarget.startMinutes,
+        start_time: minutesToTimeInput(weekDropTarget.startMinutes),
+      });
       return;
     }
 
     if (dragData.type === "month-block" && monthDropTarget) {
+      if (block.start_local_date === monthDropTarget.date) {
+        return;
+      }
+
       suppressClickUntilRef.current = Date.now() + DRAG_CLICK_SUPPRESSION_MS;
-      moveBlockToDatePreservingTime(block, monthDropTarget.date);
+      queueOptimisticDragMove(block, {
+        duration_minutes: block.end_minutes - block.start_minutes,
+        end_local_date: monthDropTarget.date,
+        end_minutes: block.end_minutes,
+        end_time: block.end_time,
+        start_local_date: monthDropTarget.date,
+        start_minutes: block.start_minutes,
+        start_time: block.start_time,
+      });
     }
   }
 
@@ -834,8 +1102,11 @@ export function PlannerCalendar({ data }: PlannerCalendarProps) {
       blocks={data.selectedDay.blocks}
       date={data.selectedDay.date}
       description="Place planned tasks into realistic blocks and leave flexible work unscheduled."
+      dndContextId={`planner-selected-day-dnd-${data.selectedDay.date}`}
       enableDragReposition={data.view === "day"}
+      enableOptimisticDragMoves={data.view === "day"}
       showUnblockedTasks
+      suppressDragSuccessMessage
       taskOptions={data.selectedDay.taskOptions}
       timezone={data.timezone}
       title="Daily schedule"
@@ -924,12 +1195,19 @@ export function PlannerCalendar({ data }: PlannerCalendarProps) {
               {error}
             </p>
           ) : null}
+          {dragTargetLabel ? (
+            <p className="rounded-md border border-border bg-background px-3 py-2 text-xs text-muted-foreground">
+              Moving to {dragTargetLabel}
+            </p>
+          ) : null}
         </CardHeader>
 
         <DndContext
           collisionDetection={pointerWithin}
+          id={PLANNER_CALENDAR_DND_CONTEXT_ID}
           onDragCancel={handleDragCancel}
           onDragEnd={handleDragEnd}
+          onDragOver={handleDragOver}
           onDragStart={handleDragStart}
           sensors={sensors}
         >
@@ -994,6 +1272,17 @@ export function PlannerCalendar({ data }: PlannerCalendarProps) {
                           const dayBlocks = blocksByDate.get(weekDate) ?? [];
                           const dayLaneLayout =
                             weekLaneLayoutByDate.get(weekDate);
+                          const isPreviewDay =
+                            activeDropTarget?.kind === "week" &&
+                            activeDropTarget.date === weekDate &&
+                            activeDragBlock !== null;
+                          const weekPreviewStyle =
+                            isPreviewDay && activeDropTarget
+                              ? {
+                                  height: `${Math.max(30, (activeDropTarget.endMinutes - activeDropTarget.startMinutes) * WEEK_MINUTE_HEIGHT)}px`,
+                                  top: `${(activeDropTarget.startMinutes - WEEK_HOUR_START) * WEEK_MINUTE_HEIGHT}px`,
+                                }
+                              : null;
 
                           return (
                             <div
@@ -1038,6 +1327,30 @@ export function PlannerCalendar({ data }: PlannerCalendarProps) {
                                   slotStartMinutes={slotStartMinutes}
                                 />
                               ))}
+
+                              {isPreviewDay && weekPreviewStyle ? (
+                                <div
+                                  aria-hidden="true"
+                                  className="absolute left-1 right-1 z-20 overflow-hidden rounded-md border border-border bg-white/95 px-2 py-1 text-left shadow-sm"
+                                  style={weekPreviewStyle}
+                                >
+                                  <p className="truncate text-xs font-semibold text-slate-900">
+                                    {activeDragBlock.title}
+                                  </p>
+                                  <p className="truncate text-[11px] text-slate-700">
+                                    {activeDropTarget.kind === "week"
+                                      ? formatTimeRange(
+                                          minutesToTimeInput(
+                                            activeDropTarget.startMinutes,
+                                          ),
+                                          minutesToTimeInput(
+                                            activeDropTarget.endMinutes,
+                                          ),
+                                        )
+                                      : null}
+                                  </p>
+                                </div>
+                              ) : null}
 
                               {dayBlocks.map((block) => {
                                 const clippedRange =
@@ -1136,6 +1449,10 @@ export function PlannerCalendar({ data }: PlannerCalendarProps) {
                       0,
                       dayBlocks.length - snippets.length,
                     );
+                    const isPreviewDay =
+                      activeDropTarget?.kind === "month" &&
+                      activeDropTarget.date === cell.date &&
+                      activeDragBlock !== null;
 
                     return (
                       <MonthDayDropTarget
@@ -1163,6 +1480,19 @@ export function PlannerCalendar({ data }: PlannerCalendarProps) {
                           {cell.dayNumber}
                         </p>
                         <div className="mt-2 space-y-1">
+                          {isPreviewDay && activeDragBlock ? (
+                            <div className="w-full rounded border border-border bg-white px-1.5 py-0.5 text-[11px] text-slate-900">
+                              <p className="truncate font-medium">
+                                {activeDragBlock.title}
+                              </p>
+                              <p className="truncate text-[10px] text-slate-700">
+                                {formatTimeRange(
+                                  activeDragBlock.start_time,
+                                  activeDragBlock.end_time,
+                                )}
+                              </p>
+                            </div>
+                          ) : null}
                           {snippets.map((block) => (
                             <DraggablePlannerItem
                               className="block w-full truncate rounded bg-secondary/70 px-1.5 py-0.5 text-left text-[11px] font-medium text-secondary-foreground hover:bg-secondary/85 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -1263,15 +1593,17 @@ export function PlannerCalendar({ data }: PlannerCalendarProps) {
           ) : null}
           <DragOverlay>
             {activeDragBlock ? (
-              <div className="max-w-[20rem] rounded-md border border-border bg-card px-2.5 py-1 shadow-xl">
-                <p className="truncate text-sm font-semibold text-foreground">
+              <div className="max-w-[20rem] rounded-md border border-border bg-white px-2.5 py-1 shadow-xl">
+                <p className="truncate text-sm font-semibold text-slate-900">
                   {activeDragBlock.title}
                 </p>
-                <p className="truncate text-xs text-muted-foreground">
-                  {formatTimeRange(
-                    activeDragBlock.start_time,
-                    activeDragBlock.end_time,
-                  )}
+                <p className="truncate text-xs text-slate-700">
+                  {dragTargetLabel
+                    ? dragTargetLabel
+                    : formatTimeRange(
+                        activeDragBlock.start_time,
+                        activeDragBlock.end_time,
+                      )}
                 </p>
               </div>
             ) : null}

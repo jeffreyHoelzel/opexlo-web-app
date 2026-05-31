@@ -161,12 +161,16 @@ export function getDateRangeForPlannerView(
       throw new Error("Use a valid calendar date.");
     }
 
-    const startDate = `${parts.year.toString().padStart(4, "0")}-${parts.month
+    const monthStart = `${parts.year.toString().padStart(4, "0")}-${parts.month
       .toString()
       .padStart(2, "0")}-01`;
+    const monthCells = getMonthCells(monthStart);
+    const startDate = monthCells[0]?.date ?? monthStart;
+    const lastVisibleDate =
+      monthCells[monthCells.length - 1]?.date ?? addMonths(monthStart, 1);
 
     return {
-      endDateExclusive: addMonths(startDate, 1),
+      endDateExclusive: addDays(lastVisibleDate, 1),
       startDate,
     };
   }
@@ -177,10 +181,16 @@ export function getDateRangeForPlannerView(
     throw new Error("Use a valid calendar date.");
   }
 
-  const startDate = `${parts.year.toString().padStart(4, "0")}-01-01`;
+  const januaryFirst = `${parts.year.toString().padStart(4, "0")}-01-01`;
+  const decemberFirst = `${parts.year.toString().padStart(4, "0")}-12-01`;
+  const januaryCells = getMonthCells(januaryFirst);
+  const decemberCells = getMonthCells(decemberFirst);
+  const startDate = januaryCells[0]?.date ?? januaryFirst;
+  const lastVisibleDate =
+    decemberCells[decemberCells.length - 1]?.date ?? addYears(januaryFirst, 1);
 
   return {
-    endDateExclusive: addYears(startDate, 1),
+    endDateExclusive: addDays(lastVisibleDate, 1),
     startDate,
   };
 }
