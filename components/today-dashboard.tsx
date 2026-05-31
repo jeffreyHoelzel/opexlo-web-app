@@ -1,14 +1,8 @@
 import Link from "next/link";
-import {
-  CalendarClock,
-  CheckCircle2,
-  Clock3,
-  Inbox,
-  Target,
-} from "lucide-react";
+import { CalendarClock, CheckCircle2, Clock3, Inbox } from "lucide-react";
 
-import { FocusStartButton } from "@/components/focus/focus-start-button";
 import { TaskList } from "@/components/tasks/task-list";
+import { TimeBlockingPanel } from "@/components/time-blocks/time-blocking-panel";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -18,9 +12,11 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import type { TaskListItem } from "@/lib/tasks/types";
+import type { TimeBlockDayData } from "@/lib/time-blocks/types";
 
 type TodayDashboardProps = {
   tasks: TaskListItem[];
+  timeBlockData: TimeBlockDayData;
   todayDate: string;
   timezone: string;
 };
@@ -46,6 +42,7 @@ function formatMinutes(minutes: number) {
 
 export function TodayDashboard({
   tasks,
+  timeBlockData,
   todayDate,
   timezone,
 }: TodayDashboardProps) {
@@ -61,62 +58,23 @@ export function TodayDashboard({
   const priorityTasks = tasks.filter(
     (task) => task.priority === "high" || task.priority === "urgent",
   );
-  const nextTask = tasks.find((task) => task.status !== "completed");
   const progress = tasks.length
     ? Math.round((completedTasks.length / tasks.length) * 100)
     : 0;
 
   return (
-    <div className="space-y-8">
-      <section className="grid gap-4 lg:grid-cols-[1fr_22rem]">
-        <div>
-          <p className="text-sm font-medium uppercase tracking-[0.18em] text-primary">
-            Today
-          </p>
-          <h1 className="mt-3 text-3xl font-semibold text-foreground md:text-5xl">
-            Make the day realistic before it gets noisy.
-          </h1>
-          <p className="mt-4 max-w-2xl text-base leading-7 text-muted-foreground">
-            {todayDate} in {timezone}. Capture work, plan only what fits, and
-            finish from a focused list.
-          </p>
-        </div>
-
-        <Card className="self-start">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Target className="size-4 text-primary" />
-              Next up
-            </CardTitle>
-            <CardDescription>
-              The next unfinished task planned for today.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {nextTask ? (
-              <div className="rounded-lg border border-border bg-secondary/65 p-4">
-                <p className="text-sm font-medium text-foreground">
-                  {nextTask.title}
-                </p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {nextTask.estimated_minutes
-                    ? `${nextTask.estimated_minutes} minutes planned`
-                    : "No estimate set"}
-                </p>
-                <div className="mt-4 grid gap-2">
-                  <FocusStartButton className="w-full" taskId={nextTask.id} />
-                  <Button asChild className="w-full" variant="outline">
-                    <Link href={getTodayTaskHref(nextTask.id)}>Open task</Link>
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <div className="rounded-lg border border-dashed border-border bg-background p-4 text-sm text-muted-foreground">
-                No unfinished planned tasks.
-              </div>
-            )}
-          </CardContent>
-        </Card>
+    <div className="space-y-6">
+      <section>
+        <p className="text-sm font-medium uppercase tracking-[0.18em] text-primary">
+          Today
+        </p>
+        <h1 className="mt-2 text-2xl font-semibold text-foreground md:text-4xl">
+          Make the day realistic before it gets noisy.
+        </h1>
+        <p className="mt-3 max-w-3xl text-base leading-7 text-muted-foreground">
+          {todayDate} in {timezone}. Capture work, plan only what fits, and
+          finish from a focused list.
+        </p>
       </section>
 
       <section className="grid gap-4 md:grid-cols-3">
@@ -158,24 +116,33 @@ export function TodayDashboard({
         </Card>
       </section>
 
+      <TimeBlockingPanel
+        blocks={timeBlockData.blocks}
+        date={timeBlockData.date}
+        description="Create time blocks for the work that needs structure today."
+        taskOptions={timeBlockData.taskOptions}
+        timezone={timeBlockData.timezone}
+        title="Time blocks"
+      />
+
       <section className="grid gap-4 lg:grid-cols-[1fr_22rem]">
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-xl">
               <CheckCircle2 className="size-5 text-primary" />
-              Planned tasks
+              Unblocked tasks
             </CardTitle>
             <CardDescription>
-              Tasks with today as their planned date.
+              Planned tasks that are not currently on the schedule.
             </CardDescription>
           </CardHeader>
           <CardContent>
             <TaskList
               editReturnPath="/app/today"
-              emptyDescription="Use the floating task button or plan an inbox task for today."
-              emptyTitle="Nothing planned for today"
+              emptyDescription="Every planned task has a time block, or there is nothing planned for today."
+              emptyTitle="No unblocked tasks"
               showUnplan
-              tasks={tasks}
+              tasks={timeBlockData.unblockedTasks}
             />
           </CardContent>
         </Card>

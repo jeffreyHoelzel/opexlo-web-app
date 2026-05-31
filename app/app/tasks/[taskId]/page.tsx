@@ -18,6 +18,7 @@ import {
   TaskStatusBadge,
 } from "@/components/tasks/task-badges";
 import { TaskForm } from "@/components/tasks/task-form";
+import { TimeBlockingPanel } from "@/components/time-blocks/time-blocking-panel";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -34,6 +35,7 @@ import {
   unplanTaskAction,
 } from "@/lib/tasks/actions";
 import { getTaskById } from "@/lib/tasks/queries";
+import { getTaskTimeBlockDayData } from "@/lib/time-blocks/queries";
 
 type TaskDetailPageProps = {
   params: Promise<{ taskId: string }>;
@@ -96,9 +98,12 @@ export default async function TaskDetailPage({
   ]);
   const returnPath = getReturnPath(resolvedSearchParams.return_to);
   const successRedirectPath = withSavedFlag(returnPath ?? "/app/tasks");
-  const taskData = await getTaskById(taskId);
+  const [taskData, timeBlockData] = await Promise.all([
+    getTaskById(taskId),
+    getTaskTimeBlockDayData(taskId),
+  ]);
 
-  if (!taskData) {
+  if (!taskData || !timeBlockData) {
     notFound();
   }
 
@@ -145,6 +150,16 @@ export default async function TaskDetailPage({
               />
             </CardContent>
           </Card>
+
+          <TimeBlockingPanel
+            blocks={timeBlockData.blocks}
+            date={timeBlockData.date}
+            description="Place this task into the day while checking the rest of the schedule."
+            lockedTaskId={task.id}
+            taskOptions={timeBlockData.taskOptions}
+            timezone={timeBlockData.timezone}
+            title="Schedule this task"
+          />
         </div>
 
         <div className="space-y-4">
